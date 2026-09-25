@@ -250,11 +250,24 @@ function render(scrollDate){
   if (scrollDate) { const b = $('.day[aria-pressed=true]'); if (b) b.scrollIntoView({ inline:'center', block:'nearest' }); }
 }
 
+/* เปลี่ยนวันโดยไม่สร้างแถบวันใหม่ ไม่งั้นแถบจะเลื่อนกลับไปวันแรกสุดทุกครั้งที่กด
+   (การเปลี่ยนวันไม่กระทบส่วนอื่นของฟอร์ม กะและคนที่เลือกไว้ยังอยู่เหมือนเดิม) */
+function setDate(v){
+  S.date = v;
+  const strip = $('.dates');
+  if (!strip) return render();
+  strip.querySelectorAll('.day').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === v));
+  const full = $('.datefull');
+  if (full) full.textContent = longDate(v);
+}
+
 function owner(code){ return S.groups.findIndex(g => g.codes.has(code)); }
 function totalPeople(){ return S.groups.reduce((n, g) => n + g.codes.size, 0); }
 
 function renderForm(){
   const d = S.d, u = d.user;
+  // เขียน #app ใหม่ทั้งก้อน แถบวันจึงเลื่อนกลับไปวันแรกสุดทุกครั้ง ต้องจำตำแหน่งเลื่อนไว้เอง
+  const keepScroll = ($('.dates') || {}).scrollLeft || 0;
   let lastM = -1;
   const days = d.dates.map(x => { const dt = pd(x.ymd);
     const sep = dt.getMonth() !== lastM ? `<span class="mth">${TH_M[dt.getMonth()]}</span>` : '';
@@ -272,6 +285,7 @@ function renderForm(){
     <p class="datefull">${S.date ? esc(longDate(S.date)) : 'ไม่มีวันที่ในรอบตาราง'}</p>
     ${groups}
     <button class="add" data-act="addgroup">+ เพิ่มกะเวลาอื่น</button>`;
+  if (keepScroll) { const strip = $('.dates'); if (strip) strip.scrollLeft = keepScroll; }
   bottom(`<div class="info"><b>${n ? n + ' คน' : 'ยังไม่ได้เลือกพนักงาน'}</b>${S.groups.filter(g=>g.codes.size).length} กะ</div>
           <button class="primary" data-act="review" ${n ? '' : 'disabled'}>ตรวจสอบ</button>`);
 }
@@ -438,7 +452,7 @@ document.addEventListener('click', e => {
   const act = el.dataset.act, v = el.dataset.v, g = S.groups[S.active];
   if (act === 'closesheet' && e.target !== el) return; // คลิกในแผ่นไม่ปิด
   switch (act) {
-    case 'date': S.date = v; render(); break;
+    case 'date': setDate(v); break;
     case 'shift': g.shift = v; g.custom = false; render(); break;
     case 'custom': { g.custom = true; if (S.d.shifts.includes(g.shift) || S.d.statuses.includes(g.shift)) g.shift = ''; render(); const inp = $('#cust'); if (inp) inp.focus(); break; }
     case 'person': { const o = owner(v); if (o === S.active) g.codes.delete(v); else { if (o >= 0) S.groups[o].codes.delete(v); g.codes.add(v); } render(); break; }

@@ -168,12 +168,34 @@ const newGroup = () => ({ shift:null, custom:false, codes:new Set() });
 
 function toast(msg){ const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2600); }
 
+/* Apps Script ตอบหน้า HTML แทน JSON เป็นครั้งคราว จึงลองใหม่ให้เฉพาะคำสั่งที่อ่านอย่างเดียว
+   ส่วน submit/approve/reject ห้ามลองซ้ำ เพราะอาจสำเร็จไปแล้วแล้วกลายเป็นคำขอซ้อน */
+const RETRYABLE = ['init', 'pending'];
+
 async function api(action, payload = {}){
-  const res = await fetch(CONFIG.GAS_URL, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
-    body: JSON.stringify(Object.assign({ action, idToken: liff.getIDToken() }, payload)) });
-  const j = await res.json();
-  if (!j.ok) throw new Error(j.error || 'เกิดข้อผิดพลาด');
-  return j;
+  const body = JSON.stringify(Object.assign({ action, idToken: liff.getIDToken() }, payload));
+  const tries = RETRYABLE.includes(action) ? 3 : 1;
+  let last = 'เกิดข้อผิดพลาด';
+  for (let i = 0; i < tries; i++) {
+    if (i) await new Promise(r => setTimeout(r, 700 * i));
+    let text;
+    try {
+      const res = await fetch(CONFIG.GAS_URL, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body });
+      text = await res.text();
+    } catch (e) {
+      last = 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ตรวจสอบสัญญาณอินเทอร์เน็ต';
+      continue;
+    }
+    let j;
+    try { j = JSON.parse(text); }
+    catch (e) {
+      last = 'เซิร์ฟเวอร์ตอบกลับไม่สมบูรณ์ (Google ขัดข้องชั่วคราว)';
+      continue;
+    }
+    if (!j.ok) throw new Error(j.error || 'เกิดข้อผิดพลาด');
+    return j;
+  }
+  throw new Error(last);
 }
 
 async function boot(){

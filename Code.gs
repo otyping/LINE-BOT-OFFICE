@@ -59,6 +59,7 @@ const VIEW_HEAD = ['รหัส', 'ชื่อ - สกุล', 'ชื่อ�
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('ตารางทำงาน')
     .addItem('สร้าง/รีเฟรชตารางรอบปัจจุบัน', 'buildCurrentPeriod')
+    .addItem('สร้าง/รีเฟรชตารางรอบถัดไป', 'buildNextPeriod')
     .addItem('สร้าง/รีเฟรชตารางรอบก่อนหน้า', 'buildPreviousPeriod')
     .addSeparator()
     .addItem('ตรวจการตั้งค่า', 'checkSetup')
@@ -701,6 +702,7 @@ function listPending_() {
 
 function buildCurrentPeriod() { buildPeriodSheet_(period_(ymd_(new Date()))); }
 function buildPreviousPeriod() { buildPeriodSheet_(prevPeriod_(period_(ymd_(new Date())))); }
+function buildNextPeriod() { buildPeriodSheet_(nextPeriod_(period_(ymd_(new Date())))); }
 
 /** สร้าง/รีเฟรชชีท "รอบ xxxx" จากบันทึกเวร ลบทิ้งแล้วสร้างใหม่ได้เสมอ */
 function buildPeriodSheet_(p) {

@@ -715,14 +715,22 @@ function buildPeriodSheet_(p) {
 
   const name = CFG.VIEW_PREFIX + p.key;
   let sh = ss.getSheetByName(name);
-  if (sh) { sh.clear(); sh.clearConditionalFormatRules(); sh.getDataRange().clearNote(); }
+  if (sh) {
+    sh.clear();
+    sh.clearConditionalFormatRules();
+    sh.getDataRange().clearNote();
+    sh.setFrozenRows(0);
+    sh.setFrozenColumns(0);
+    // ปลด merge เก่าออกก่อน ไม่งั้น setFrozenColumns จะผ่ากลางเซลล์ที่ merge ไว้แล้ว error
+    sh.getRange(1, 1, sh.getMaxRows(), sh.getMaxColumns()).breakApart();
+  }
   else sh = ss.insertSheet(name);
 
   const nCol = VIEW_HEAD.length + dates.length;
 
-  // แถว 1 หัวเรื่อง
-  sh.getRange(1, 1).setValue('ตารางทำงาน วันที่ ' + p.label);
-  sh.getRange(1, 1, 1, nCol).merge().setFontWeight('bold').setHorizontalAlignment('center');
+  // แถว 1 หัวเรื่อง ไม่ merge เพราะจะตรึงคอลัมน์ไม่ได้ ปล่อยให้ข้อความล้นไปช่องว่างข้าง ๆ เอง
+  sh.getRange(1, 1).setValue('ตารางทำงาน วันที่ ' + p.label)
+    .setFontWeight('bold').setFontSize(12).setHorizontalAlignment('left');
 
   // แถว 2 หัวตาราง + วันที่
   sh.getRange(2, 1, 1, VIEW_HEAD.length).setValues([VIEW_HEAD]);

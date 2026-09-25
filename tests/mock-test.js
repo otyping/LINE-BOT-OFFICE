@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 
 /* ---------- จำลอง Spreadsheet ---------- */
-function Sheet(name, grid) { this.name = name; this.g = grid || []; this.notes = {}; this.rules = []; }
+function Sheet(name, grid) { this.name = name; this.g = grid || []; this.notes = {}; this.rules = []; this.merges = []; }
 Sheet.prototype.getName = function () { return this.name; };
 Sheet.prototype.getLastRow = function () { return this.g.length; };
 Sheet.prototype.getLastColumn = function () { return Math.max(0, ...this.g.map(r => (r || []).length)); };
@@ -27,18 +27,29 @@ Sheet.prototype.getRange = function (r, c, nr, nc) {
     setValues(vs) { vs.forEach((row, i) => row.forEach((v, j) => { (s.g[r - 1 + i] = s.g[r - 1 + i] || [])[c - 1 + j] = v === undefined ? '' : v; })); return this; },
     getNote: () => s.notes[r + ',' + c] || '',
     setNote(n) { s.notes[r + ',' + c] = n; return this; },
-    clearNote() { s.notes = {}; return this; }
+    clearNote() { s.notes = {}; return this; },
+    merge() { s.merges.push({ c: c, nc: nc }); return this; },
+    breakApart() { s.merges = s.merges.filter(m => m.c < c || m.c + m.nc - 1 > c + nc - 1); return this; }
   };
-  ['setFontWeight', 'setNumberFormat', 'setDataValidation', 'merge', 'setHorizontalAlignment',
-   'setBackground', 'setFontColor'].forEach(m => (api[m] = () => api));
+  ['setFontWeight', 'setNumberFormat', 'setDataValidation', 'setHorizontalAlignment',
+   'setBackground', 'setFontColor', 'setFontSize'].forEach(m => (api[m] = () => api));
   return api;
 };
 Sheet.prototype.getDataRange = function () { return this.getRange(1, 1, Math.max(this.g.length, 1), Math.max(this.getLastColumn(), 1)); };
 Sheet.prototype.appendRow = function (r) { this.g.push(r); };
 Sheet.prototype.clear = function () { this.g = []; this.notes = {}; return this; };
+Sheet.prototype.getMaxRows = function () { return Math.max(this.g.length, 1000); };
+Sheet.prototype.getMaxColumns = function () { return Math.max(this.getLastColumn(), 26); };
 Sheet.prototype.clearConditionalFormatRules = function () { this.rules = []; };
 Sheet.prototype.setConditionalFormatRules = function (r) { this.rules = r; };
-['setFrozenRows', 'setFrozenColumns', 'setColumnWidth'].forEach(m => (Sheet.prototype[m] = function () { return this; }));
+['setFrozenRows', 'setColumnWidth'].forEach(m => (Sheet.prototype[m] = function () { return this; }));
+// Google Sheets จะ error ถ้าตรึงคอลัมน์ผ่ากลางเซลล์ที่ merge ไว้ จำลองไว้กันบั๊กซ้ำ
+Sheet.prototype.setFrozenColumns = function (n) {
+  if (n > 0 && this.merges.some(m => m.c <= n && m.c + m.nc - 1 > n)) {
+    throw new Error("Sorry, you can't freeze columns which contain only part of a merged cell.");
+  }
+  return this;
+};
 
 const fmt = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const sheets = {};

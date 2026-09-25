@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ตารางทำงาน KB</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anuphan:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#FBFCF8; --card:#FFFFFF; --ink:#1D2B21; --muted:#5E6B61; --line:#DCE3DA;
+  --leaf:#2F6B45; --leaf-ink:#FFFFFF; --sprout:#DDEEC4; --sprout-ink:#23512F;
+  --amber:#9A5F10; --amber-bg:#FBEBD0; --danger:#A3372B; --track:#E7ECE4;
+  --r-lg:14px; --r-sm:9px;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --paper:#111814; --card:#18221B; --ink:#E6EEE7; --muted:#9BA89E; --line:#2B3B30;
+    --leaf:#7CC495; --leaf-ink:#0F1A13; --sprout:#24452F; --sprout-ink:#CDEBD5;
+    --amber:#F0B45C; --amber-bg:#3A2C14; --danger:#F08A7E; --track:#243128;
+    color-scheme:dark;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--paper);color:var(--ink)}
+body{font-family:'Anuphan',system-ui,-apple-system,'Segoe UI',Tahoma,sans-serif;font-size:15px;line-height:1.55;
+  padding-bottom:calc(88px + env(safe-area-inset-bottom,0px));-webkit-tap-highlight-color:transparent}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--leaf);outline-offset:2px}
+.wrap{max-width:560px;margin:0 auto;padding:calc(14px + env(safe-area-inset-top,0px)) 16px 0}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px}
+h1{font-size:22px;font-weight:600;margin:0;line-height:1.3}
+.sub{color:var(--muted);font-size:13px;margin:2px 0 0}
+.linkbtn{background:none;border:1px solid var(--line);border-radius:999px;padding:6px 12px;font-size:13px;white-space:nowrap}
+.state{padding:40px 8px;text-align:center;color:var(--muted)}
+.state h2{color:var(--ink);font-size:17px;font-weight:600;margin:0 0 6px}
+
+/* date strip */
+.dates{display:flex;gap:6px;overflow-x:auto;padding:2px 2px 10px;margin:0 -16px 8px;padding-left:16px;padding-right:16px;scrollbar-width:none}
+.dates::-webkit-scrollbar{display:none}
+.day{flex:none;width:52px;border:1px solid var(--line);background:var(--card);border-radius:var(--r-sm);padding:6px 0;text-align:center;line-height:1.2}
+.day small{display:block;font-size:11px;color:var(--muted)}
+.day b{display:block;font-size:18px;font-weight:600}
+.day.sun small{color:var(--danger)}
+.mth{flex:none;align-self:center;font-size:11px;color:var(--muted);writing-mode:vertical-rl;padding:2px 0;border-left:1px solid var(--line)}
+.day[aria-pressed=true]{background:var(--leaf);border-color:var(--leaf);color:var(--leaf-ink)}
+.day[aria-pressed=true] small{color:inherit;opacity:.85}
+.datefull{font-size:13px;color:var(--muted);margin:0 0 14px}
+
+/* group */
+.group{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);padding:14px;margin-bottom:12px}
+.group.idle{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;text-align:left}
+.ghead{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.ghead h2{font-size:15px;font-weight:600;margin:0}
+.x{background:none;border:0;color:var(--muted);font-size:13px;padding:4px}
+.label{font-size:13px;color:var(--muted);margin:14px 0 6px}
+
+/* shift tiles: the one expressive element — a 24h bar per shift */
+.shifts{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.tile{border:1px solid var(--line);background:var(--paper);border-radius:var(--r-sm);padding:9px 10px 10px;text-align:left}
+.tile .t{font-size:17px;font-weight:600;letter-spacing:.2px;font-variant-numeric:tabular-nums}
+.bar{position:relative;height:6px;border-radius:3px;background:var(--track);margin-top:7px;overflow:hidden}
+.bar i{position:absolute;top:0;bottom:0;background:var(--leaf);border-radius:3px}
+.bar::before,.bar::after{content:'';position:absolute;top:0;bottom:0;width:1px;background:var(--line);z-index:1}
+.bar::before{left:25%}.bar::after{left:75%}
+.tile[aria-pressed=true]{border-color:var(--leaf);box-shadow:inset 0 0 0 1px var(--leaf);background:var(--sprout)}
+.tile[aria-pressed=true] .t{color:var(--sprout-ink)}
+.statuses{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.pill{border:1px solid var(--line);background:var(--paper);border-radius:999px;padding:5px 13px;font-size:14px}
+.pill[aria-pressed=true]{background:var(--ink);border-color:var(--ink);color:var(--paper)}
+.custom{display:flex;gap:6px;margin-top:8px}
+.custom input{flex:1;min-width:0;border:1px solid var(--line);background:var(--paper);border-radius:var(--r-sm);padding:8px 10px;font-variant-numeric:tabular-nums}
+
+/* people */
+.dept{margin-top:12px}
+.dept-h{display:flex;justify-content:space-between;align-items:center;width:100%;background:none;border:0;padding:4px 0;font-size:13px;color:var(--muted);text-align:left}
+.dept-h b{color:var(--ink);font-weight:600}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+.chip{border:1px solid var(--line);background:var(--paper);border-radius:var(--r-sm);padding:6px 11px;font-size:15px;line-height:1.25;text-align:left}
+.chip small{display:block;font-size:11px;color:var(--muted)}
+.chip[aria-pressed=true]{background:var(--sprout);border-color:var(--leaf);color:var(--sprout-ink)}
+.chip[aria-pressed=true] small{color:inherit;opacity:.8}
+.chip.taken{opacity:.55;border-style:dashed}
+.add{width:100%;border:1px dashed var(--line);background:none;border-radius:var(--r-lg);padding:12px;color:var(--muted)}
+
+/* bottom bar */
+.bottom{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);
+  padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px));z-index:5}
+.bottom .in{max-width:560px;margin:0 auto;display:flex;align-items:center;gap:12px}
+.bottom .info{flex:1;font-size:13px;color:var(--muted);line-height:1.35}
+.bottom .info b{display:block;color:var(--ink);font-size:15px;font-weight:600}
+.primary{background:var(--leaf);color:var(--leaf-ink);border:0;border-radius:var(--r-sm);padding:11px 18px;font-weight:600}
+.primary:disabled{opacity:.4;cursor:default}
+.ghost{background:none;border:1px solid var(--line);border-radius:var(--r-sm);padding:11px 16px}
+.dangerbtn{background:none;border:1px solid var(--danger);color:var(--danger);border-radius:var(--r-sm);padding:9px 14px}
+
+/* review sheet */
+.scrim{position:fixed;inset:0;background:rgba(10,20,14,.45);z-index:9;display:flex;align-items:flex-end}
+.sheet{background:var(--card);width:100%;max-width:560px;margin:0 auto;border-radius:18px 18px 0 0;
+  padding:18px 16px calc(16px + env(safe-area-inset-bottom,0px));max-height:88vh;overflow:auto;animation:up .22s ease-out}
+@keyframes up{from{transform:translateY(24px);opacity:.6}}
+@media (prefers-reduced-motion:reduce){.sheet{animation:none}}
+.sheet h2{font-size:18px;font-weight:600;margin:0 0 2px}
+.sum{margin:14px 0;border-top:1px solid var(--line)}
+.sum div{padding:10px 0;border-bottom:1px solid var(--line)}
+.sum b{font-variant-numeric:tabular-nums;font-weight:600}
+.sum p{margin:2px 0 0}
+.note{font-size:13px;color:var(--muted);margin:0 0 14px}
+.warn{background:var(--amber-bg);color:var(--amber);border-radius:var(--r-sm);padding:8px 10px;font-size:13px;margin:8px 0}
+.row2{display:flex;gap:8px}.row2>*{flex:1}
+
+/* done */
+.done{text-align:center;padding:28px 4px}
+.done svg{width:52px;height:52px;color:var(--leaf)}
+.done h2{font-size:20px;font-weight:600;margin:10px 0 4px}
+.done .sum{text-align:left}
+
+/* approve */
+.req{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);margin-bottom:10px;overflow:hidden}
+.req.on{border-color:var(--leaf)}
+.req-h{display:flex;gap:12px;padding:12px 14px;align-items:flex-start}
+.req-h input{width:22px;height:22px;margin:2px 0 0;accent-color:var(--leaf);flex:none}
+.req-h .m{flex:1;min-width:0}
+.req-h h3{margin:0;font-size:15px;font-weight:600}
+.req-h p{margin:1px 0 0;font-size:13px;color:var(--muted)}
+.more{background:none;border:0;border-top:1px solid var(--line);width:100%;padding:9px 14px;font-size:13px;color:var(--muted);text-align:left}
+.detail{padding:4px 14px 14px;border-top:1px solid var(--line)}
+.ent{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}
+.ent .n{flex:1;min-width:0}
+.ent .n small{display:block;color:var(--muted);font-size:12px}
+.ent select{border:1px solid var(--line);background:var(--paper);border-radius:8px;padding:6px 8px;font-variant-numeric:tabular-nums;max-width:48%}
+.ent select.changed{border-color:var(--amber);background:var(--amber-bg)}
+textarea{width:100%;border:1px solid var(--line);background:var(--paper);border-radius:var(--r-sm);padding:8px 10px;min-height:64px;margin:8px 0}
+.toast{position:fixed;left:50%;bottom:calc(96px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);
+  background:var(--ink);color:var(--paper);padding:9px 16px;border-radius:999px;font-size:14px;z-index:20;
+  opacity:0;pointer-events:none;transition:opacity .2s;max-width:90vw;text-align:center}
+.toast.show{opacity:1}
+.uid{font-family:ui-monospace,Menlo,monospace;font-size:12px;word-break:break-all;background:var(--card);border:1px solid var(--line);border-radius:var(--r-sm);padding:10px;margin:12px 0;text-align:left}
+</style>
+</head>
+<body>
+<main class="wrap" id="app"><div class="state">กำลังเปิดฟอร์ม…</div></main>
+<div id="overlay"></div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script>
+/* ====== ตั้งค่า: แก้ 2 บรรทัดนี้ ====== */
+const CONFIG = {
+  LIFF_ID: '2011747363-g804lTFO',
+  GAS_URL: 'https://script.google.com/macros/s/AKfycbxzf_HqgxPnuQ7JEz9dF08DtKiVJjDwl4_8Vxu0XLAJmKfQO9dJQV5i1CetpZr9qZHu4w/exec'
+};
+/* ===================================== */
+
+const TH_M = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+const TH_D = ['อา.','จ.','อ.','พ.','พฤ.','ศ.','ส.'];
+const TH_DL = ['อาทิตย์','จันทร์','อังคาร','พุธ','พฤหัสบดี','ศุกร์','เสาร์'];
+const S = { d:null, page:'form', date:null, groups:[], active:0, openDept:new Set(),
+            pending:[], sel:new Set(), expanded:new Set(), edits:{}, rejecting:null, busy:false };
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pd = ymd => { const [y,m,d] = ymd.split('-').map(Number); return new Date(y, m-1, d); };
+const longDate = ymd => { const x = pd(ymd); return 'วัน' + TH_DL[x.getDay()] + 'ที่ ' + x.getDate() + ' ' + TH_M[x.getMonth()] + ' ' + (x.getFullYear()+543); };
+const newGroup = () => ({ shift:null, custom:false, codes:new Set() });
+
+function toast(msg){ const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2600); }
+
+async function api(action, payload = {}){
+  const res = await fetch(CONFIG.GAS_URL, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body: JSON.stringify(Object.assign({ action, idToken: liff.getIDToken() }, payload)) });
+  const j = await res.json();
+  if (!j.ok) throw new Error(j.error || 'เกิดข้อผิดพลาด');
+  return j;
+}
+
+async function boot(){
+  try {
+    await liff.init({ liffId: CONFIG.LIFF_ID });
+    if (!liff.isLoggedIn()) { liff.login({ redirectUri: location.href }); return; }
+    const q = new URLSearchParams(location.search);
+    const d = await api('init');
+    S.d = d;
+    if (!d.user) return noAccess(d.me);
+    S.date = d.defaultDate;
+    S.groups = [newGroup()];
+    (d.user.depts.length ? d.user.depts : [...new Set(d.employees.map(e => e.dept))]).forEach(x => S.openDept.add(x));
+    if (q.get('page') === 'approve') {
+      if (d.user.role === 'HR') { S.page = 'approve'; S.pending = d.pending || []; const id = q.get('id'); if (id) { S.sel.add(id); S.expanded.add(id); } }
+      else toast('หน้ารายการรออนุมัติสำหรับ HR เท่านั้น');
+    }
+    render(true);
+  } catch (e) { fail(e.message); }
+}
+
+function fail(msg){
+  $('#app').innerHTML = `<div class="state"><h2>เปิดฟอร์มไม่สำเร็จ</h2><p>${esc(msg)}</p>
+    <button class="ghost" onclick="location.reload()">ลองใหม่</button></div>`;
+}
+function noAccess(me){
+  $('#app').innerHTML = `<div class="state"><h2>บัญชีนี้ยังไม่มีสิทธิ์ใช้งาน</h2>
+    <p>ส่งรหัสด้านล่างให้ผู้ดูแลระบบ เพื่อเพิ่มในชีท "ผู้ใช้ระบบ"</p>
+    <div class="uid">${esc(me.userId)}</div><p>${esc(me.name)}</p>
+    <button class="ghost" data-act="copyid" data-v="${esc(me.userId)}">คัดลอกรหัส</button></div>`;
+}
+
+/* ---------- 24h bar ---------- */
+function bar(shift){
+  const m = shift.match(/^(\d+)\.(\d+)-(\d+)\.(\d+)$/); if (!m) return '';
+  const a = (+m[1]*60 + +m[2]) / 1440 * 100, b = (+m[3]*60 + +m[4]) / 1440 * 100;
+  const seg = b > a ? [[a, b]] : [[a, 100], [0, b]];
+  return `<div class="bar" aria-hidden="true">${seg.map(([x,y]) => `<i style="left:${x}%;width:${y-x}%"></i>`).join('')}</div>`;
+}
+function normShift(s){
+  s = String(s || '').trim().replace(/:/g,'.').replace(/\s+/g,'');
+  const m = s.match(/^(\d{1,2})\.(\d{2})-(\d{1,2})\.(\d{2})$/);
+  if (!m || +m[1] > 23 || +m[3] > 23 || +m[2] > 59 || +m[4] > 59) return null;
+  return (+m[1]) + '.' + m[2] + '-' + ('0' + (+m[3])).slice(-2) + '.' + m[4];
+}
+
+/* ---------- render ---------- */
+function render(scrollDate){
+  if (S.page === 'approve') return renderApprove();
+  if (S.page === 'done') return;
+  renderForm();
+  if (scrollDate) { const b = $('.day[aria-pressed=true]'); if (b) b.scrollIntoView({ inline:'center', block:'nearest' }); }
+}
+
+function owner(code){ return S.groups.findIndex(g => g.codes.has(code)); }
+function totalPeople(){ return S.groups.reduce((n, g) => n + g.codes.size, 0); }
+
+function renderForm(){
+  const d = S.d, u = d.user;
+  let lastM = -1;
+  const days = d.dates.map(x => { const dt = pd(x.ymd);
+    const sep = dt.getMonth() !== lastM ? `<span class="mth">${TH_M[dt.getMonth()]}</span>` : '';
+    lastM = dt.getMonth();
+    return sep + `<button class="day ${dt.getDay()===0?'sun':''}" data-act="date" data-v="${x.ymd}" aria-pressed="${x.ymd===S.date}" aria-label="${esc(longDate(x.ymd))}">
+      <small>${TH_D[dt.getDay()]}</small><b>${dt.getDate()}</b></button>`; }).join('');
+
+  const groups = S.groups.map((g, i) => i === S.active ? activeGroup(g, i) : idleGroup(g, i)).join('');
+  const n = totalPeople();
+  const hr = u.role === 'HR' ? `<button class="linkbtn" data-act="goapprove">รออนุมัติ ${d.pending ? d.pending.length : ''}</button>` : '';
+
+  $('#app').innerHTML = `
+    <div class="top"><div><h1>แจ้งวันทำงาน</h1><p class="sub">${esc(u.name)}</p></div>${hr}</div>
+    <div class="dates" role="group" aria-label="เลือกวันที่">${days}</div>
+    <p class="datefull">${S.date ? esc(longDate(S.date)) : 'ไม่มีวันที่ในรอบตาราง'}</p>
+    ${groups}
+    <button class="add" data-act="addgroup">+ เพิ่มกะเวลาอื่น</button>`;
+  bottom(`<div class="info"><b>${n ? n + ' คน' : 'ยังไม่ได้เลือกพนักงาน'}</b>${S.groups.filter(g=>g.codes.size).length} กะ</div>
+          <button class="primary" data-act="review" ${n ? '' : 'disabled'}>ตรวจสอบ</button>`);
+}
+
+function activeGroup(g, i){
+  const d = S.d;
+  const tiles = d.shifts.map(s => `<button class="tile" data-act="shift" data-v="${s}" aria-pressed="${g.shift===s && !g.custom}">
+      <div class="t">${s}</div>${bar(s)}</button>`).join('');
+  const st = d.statuses.map(s => `<button class="pill" data-act="shift" data-v="${s}" aria-pressed="${g.shift===s}">${s}</button>`).join('')
+    + `<button class="pill" data-act="custom" aria-pressed="${g.custom}">เวลาอื่น</button>`;
+  const custom = g.custom ? `<div class="custom"><input id="cust" inputmode="decimal" placeholder="เช่น 7.00-16.00" value="${esc(g.shift||'')}" aria-label="เวลาเข้า-ออก"></div>` : '';
+
+  const byDept = {};
+  d.employees.forEach(e => (byDept[e.dept] = byDept[e.dept] || []).push(e));
+  const mine = d.user.depts;
+  const order = Object.keys(byDept).sort((a, b) => (mine.includes(b) - mine.includes(a)));
+  const depts = order.map(dep => {
+    const list = byDept[dep], open = S.openDept.has(dep);
+    const picked = list.filter(e => g.codes.has(e.code)).length;
+    const chips = open ? `<div class="chips">${list.map(e => {
+      const o = owner(e.code), on = o === i, taken = o >= 0 && !on;
+      const sub = taken ? (S.groups[o].shift || 'กะอื่น') : e.code;
+      return `<button class="chip ${taken?'taken':''}" data-act="person" data-v="${esc(e.code)}" aria-pressed="${on}">${esc(e.label)}<small>${esc(sub)}</small></button>`;
+    }).join('')}</div>` : '';
+    return `<div class="dept"><button class="dept-h" data-act="dept" data-v="${esc(dep)}" aria-expanded="${open}">
+      <span><b>${esc(dep)}</b> ${list.length} คน</span><span>${picked ? 'เลือก ' + picked : ''} ${open ? '▴' : '▾'}</span></button>${chips}</div>`;
+  }).join('');
+
+  return `<section class="group" aria-label="กะที่ ${i+1}">
+    <div class="ghead"><h2>กะที่ ${i+1}</h2>${S.groups.length > 1 ? `<button class="x" data-act="delgroup" data-v="${i}">ลบกะนี้</button>` : ''}</div>
+    <div class="label">เวลาเข้า-ออก</div>
+    <div class="shifts">${tiles}</div>
+    <div class="statuses">${st}</div>${custom}
+    <div class="label">พนักงาน</div>${depts}</section>`;
+}
+
+function idleGroup(g, i){
+  const names = S.d.employees.filter(e => g.codes.has(e.code)).map(e => e.label);
+  return `<button class="group idle" data-act="focus" data-v="${i}">
+    <span><b>${esc(g.shift || 'ยังไม่เลือกเวลา')}</b><br><span class="sub">${names.length ? esc(names.join(', ')) : 'ยังไม่เลือกพนักงาน'}</span></span>
+    <span class="sub">แก้ไข</span></button>`;
+}
+
+function bottom(html){
+  let b = $('#bottombar');
+  if (!b) { b = document.createElement('div'); b.id = 'bottombar'; b.className = 'bottom'; document.body.appendChild(b); }
+  b.innerHTML = `<div class="in">${html}</div>`;
+  b.hidden = !html;
+}
+
+function collect(){
+  const groups = S.groups.filter(g => g.codes.size);
+  for (const g of groups) {
+    if (!g.shift) return { err: 'ยังไม่ได้เลือกเวลาของกะที่มี ' + g.codes.size + ' คน' };
+    if (g.custom && !S.d.statuses.includes(g.shift) && !normShift(g.shift)) return { err: 'รูปแบบเวลา "' + g.shift + '" ไม่ถูกต้อง ตัวอย่าง 7.00-16.00' };
+  }
+  const lab = c => (S.d.employees.find(e => e.code === c) || {}).label || c;
+  return { groups: groups.map(g => ({ shift: g.custom ? (normShift(g.shift) || g.shift) : g.shift, codes: [...g.codes], names: [...g.codes].map(lab) })) };
+}
+
+function openReview(){
+  const c = collect();
+  if (c.err) return toast(c.err);
+  $('#overlay').innerHTML = `<div class="scrim" data-act="closesheet"><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="rv">
+    <h2 id="rv">ตรวจสอบก่อนส่ง</h2><p class="note">${esc(longDate(S.date))}</p>
+    <div class="sum">${c.groups.map(g => `<div><b>${esc(g.shift)}</b> <span class="sub">${g.names.length} คน</span><p>${esc(g.names.join(', '))}</p></div>`).join('')}</div>
+    <p class="note">คำขอจะส่งถึงหัวหน้า HR ระหว่างรอ ตารางจะขึ้นว่า (รอ) จนกว่าจะอนุมัติ</p>
+    <div class="row2"><button class="ghost" data-act="closesheet">แก้ไข</button>
+    <button class="primary" data-act="submit" ${S.busy ? 'disabled' : ''}>${S.busy ? 'กำลังส่ง…' : 'ส่งขออนุมัติ'}</button></div></div></div>`;
+}
+function closeSheet(){ $('#overlay').innerHTML = ''; }
+
+async function submit(){
+  if (S.busy) return;
+  const c = collect(); if (c.err) return toast(c.err);
+  S.busy = true; openReview();
+  try {
+    const r = await api('submit', { date: S.date, groups: c.groups.map(g => ({ shift: g.shift, codes: g.codes })) });
+    const text = `ขออนุมัติตาราง ${r.dateLabel} (#${r.id})\n` + r.groups.map(g => `${g.shift}: ${g.names.join(', ')}`).join('\n');
+    try { const ctx = liff.getContext(); if (ctx && ['group','room','utou'].includes(ctx.type)) await liff.sendMessages([{ type:'text', text }]); } catch (e) {}
+    closeSheet(); showDone(r);
+  } catch (e) { toast(e.message); openReview(); }
+  finally { S.busy = false; const b = $('[data-act=submit]'); if (b) { b.disabled = false; b.textContent = 'ส่งขออนุมัติ'; } }
+}
+
+function showDone(r){
+  S.page = 'done';
+  bottom('');
+  $('#app').innerHTML = `<div class="done">
+    <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="24" cy="24" r="21"/><path d="M14 24.5l7 7 13-14"/></svg>
+    <h2>ส่งขออนุมัติแล้ว</h2><p class="sub">คำขอ #${esc(r.id)} ตาราง ${esc(r.dateLabel)}</p>
+    <div class="sum">${r.groups.map(g => `<div><b>${esc(g.shift)}</b><p>${esc(g.names.join(', '))}</p></div>`).join('')}</div>
+    ${(r.warnings||[]).map(w => `<div class="warn">${esc(w)}</div>`).join('')}
+    <p class="note">หัวหน้า HR ได้รับแจ้งแล้ว เมื่ออนุมัติ บอทจะส่งข้อความบอกคุณ</p>
+    <div class="row2"><button class="ghost" data-act="again">แจ้งวันอื่นต่อ</button><button class="primary" data-act="close">ปิด</button></div></div>`;
+}
+
+/* ---------- approve (HR) ---------- */
+function optionList(cur){
+  const all = [...S.d.shifts, ...S.d.statuses];
+  if (cur && !all.includes(cur)) all.unshift(cur);
+  return all.map(s => `<option ${s===cur?'selected':''}>${esc(s)}</option>`).join('');
+}
+function renderApprove(){
+  const d = S.d, list = S.pending;
+  const warnNo = (d.noCode && d.noCode.length) ? `<div class="warn">ยังไม่มีรหัสในตาราง จึงไม่แสดงในฟอร์ม: ${esc(d.noCode.join(', '))}</div>` : '';
+  const cards = list.map(r => {
+    const on = S.sel.has(r.id), ex = S.expanded.has(r.id), ed = S.edits[r.id] || {};
+    const shifts = [...new Set(r.entries.map(e => ed[e.code] || e.shift))];
+    const detail = ex ? `<div class="detail">
+      ${r.entries.map(e => { const v = ed[e.code] || e.shift; return `<div class="ent"><div class="n">${esc(e.label)}<small>${e.old ? 'เดิม: ' + esc(e.old) : 'เดิม: ว่าง'}</small></div>
+        <select class="${v!==e.shift?'changed':''}" data-act="edit" data-id="${esc(r.id)}" data-code="${esc(e.code)}" aria-label="เวลาของ ${esc(e.label)}">${optionList(v)}</select></div>`; }).join('')}
+      ${(r.warnings||[]).map(w => `<div class="warn">${esc(w)}</div>`).join('')}
+      ${S.rejecting === r.id
+        ? `<textarea id="reason" placeholder="เหตุผลที่ไม่อนุมัติ (ส่งถึงผู้แจ้ง)"></textarea>
+           <div class="row2"><button class="ghost" data-act="cancelreject">ยกเลิก</button><button class="dangerbtn" data-act="doreject" data-id="${esc(r.id)}">ยืนยันไม่อนุมัติ</button></div>`
+        : `<div style="margin-top:12px"><button class="dangerbtn" data-act="reject" data-id="${esc(r.id)}">ไม่อนุมัติ</button></div>`}
+      </div>` : '';
+    return `<article class="req ${on?'on':''}">
+      <label class="req-h"><input type="checkbox" data-act="sel" data-id="${esc(r.id)}" ${on?'checked':''}>
+        <div class="m"><h3>${esc(r.dateLabel)}, ${r.entries.length} คน</h3>
+        <p>${esc(shifts.join(', '))}</p><p>#${esc(r.id)} จาก ${esc(r.fromName)} ส่งเมื่อ ${esc(r.createdLabel)}</p></div></label>
+      <button class="more" data-act="expand" data-id="${esc(r.id)}" aria-expanded="${ex}">${ex ? 'ซ่อนรายละเอียด' : 'ดูรายชื่อและแก้เวลา'}</button>${detail}</article>`;
+  }).join('');
+
+  $('#app').innerHTML = `
+    <div class="top"><div><h1>รออนุมัติ</h1><p class="sub">${list.length ? list.length + ' คำขอ' : 'ไม่มีคำขอค้าง'}</p></div>
+      <button class="linkbtn" data-act="goform">แจ้งวันทำงาน</button></div>
+    ${warnNo}
+    ${list.length ? cards : `<div class="state"><p>ไม่มีคำขอที่รออนุมัติ เมื่อหัวหน้างานส่งคำขอ บอทจะแจ้งคุณในแชท</p></div>`}`;
+  const n = [...S.sel].filter(id => list.some(r => r.id === id)).length;
+  bottom(list.length ? `<div class="info"><b>เลือก ${n} คำขอ</b>ตารางจะอัปเดตทันทีที่อนุมัติ</div>
+    <button class="primary" data-act="approve" ${n && !S.busy ? '' : 'disabled'}>${S.busy ? 'กำลังบันทึก…' : 'อนุมัติที่เลือก'}</button>` : '');
+}
+
+async function refreshPending(){ const r = await api('pending'); S.pending = r.pending; S.d.pending = r.pending; }
+
+async function approveSelected(){
+  const ids = [...S.sel].filter(id => S.pending.some(r => r.id === id));
+  if (!ids.length || S.busy) return;
+  S.busy = true; renderApprove();
+  let ok = 0; const errs = [];
+  for (const id of ids) {
+    try { await api('approve', { id, edits: S.edits[id] || {} }); ok++; S.sel.delete(id); S.expanded.delete(id); delete S.edits[id]; }
+    catch (e) { errs.push('#' + id + ': ' + e.message); }
+  }
+  try { await refreshPending(); } catch (e) {}
+  S.busy = false; renderApprove();
+  toast(errs.length ? errs[0] : 'อนุมัติแล้ว ' + ok + ' คำขอ');
+}
+
+async function doReject(id){
+  if (S.busy) return;
+  const reason = ($('#reason') || {}).value || '';
+  S.busy = true;
+  try { await api('reject', { id, reason }); S.sel.delete(id); S.expanded.delete(id); S.rejecting = null; await refreshPending(); toast('ไม่อนุมัติ #' + id + ' แล้ว ตารางยังเป็นค่าเดิม'); }
+  catch (e) { toast(e.message); }
+  S.busy = false; renderApprove();
+}
+
+/* ---------- events ---------- */
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-act]'); if (!el) return;
+  const act = el.dataset.act, v = el.dataset.v, g = S.groups[S.active];
+  if (act === 'closesheet' && e.target !== el) return; // คลิกในแผ่นไม่ปิด
+  switch (act) {
+    case 'date': S.date = v; render(); break;
+    case 'shift': g.shift = v; g.custom = false; render(); break;
+    case 'custom': { g.custom = true; if (S.d.shifts.includes(g.shift) || S.d.statuses.includes(g.shift)) g.shift = ''; render(); const inp = $('#cust'); if (inp) inp.focus(); break; }
+    case 'person': { const o = owner(v); if (o === S.active) g.codes.delete(v); else { if (o >= 0) S.groups[o].codes.delete(v); g.codes.add(v); } render(); break; }
+    case 'dept': S.openDept.has(v) ? S.openDept.delete(v) : S.openDept.add(v); render(); break;
+    case 'addgroup': S.groups.push(newGroup()); S.active = S.groups.length - 1; render(); break;
+    case 'delgroup': S.groups.splice(+v, 1); S.active = 0; render(); break;
+    case 'focus': S.active = +v; render(); break;
+    case 'review': openReview(); break;
+    case 'closesheet': closeSheet(); break;
+    case 'submit': submit(); break;
+    case 'again': S.page = 'form'; S.groups = [newGroup()]; S.active = 0; render(true); break;
+    case 'close': liff.closeWindow(); break;
+    case 'goapprove': S.page = 'approve'; S.pending = S.d.pending || []; render(); window.scrollTo(0,0); break;
+    case 'goform': S.page = 'form'; render(true); window.scrollTo(0,0); break;
+    case 'expand': { const id = el.dataset.id; S.expanded.has(id) ? S.expanded.delete(id) : S.expanded.add(id); renderApprove(); break; }
+    case 'approve': approveSelected(); break;
+    case 'reject': S.rejecting = el.dataset.id; renderApprove(); break;
+    case 'cancelreject': S.rejecting = null; renderApprove(); break;
+    case 'doreject': doReject(el.dataset.id); break;
+    case 'copyid': navigator.clipboard && navigator.clipboard.writeText(v).then(() => toast('คัดลอกแล้ว')); break;
+  }
+});
+document.addEventListener('change', e => {
+  const el = e.target;
+  if (el.dataset.act === 'sel') { el.checked ? S.sel.add(el.dataset.id) : S.sel.delete(el.dataset.id); renderApprove(); }
+  if (el.dataset.act === 'edit') {
+    const r = S.pending.find(x => x.id === el.dataset.id), en = r.entries.find(x => x.code === el.dataset.code);
+    S.edits[r.id] = S.edits[r.id] || {};
+    if (el.value === en.shift) delete S.edits[r.id][en.code]; else S.edits[r.id][en.code] = el.value;
+    renderApprove();
+  }
+});
+document.addEventListener('input', e => {
+  if (e.target.id === 'cust') S.groups[S.active].shift = e.target.value;
+});
+document.addEventListener('focusout', e => {
+  if (e.target.id === 'cust') { const n = normShift(e.target.value); if (n) { S.groups[S.active].shift = n; } }
+});
+
+boot();
+</script>
+</body>
+</html>

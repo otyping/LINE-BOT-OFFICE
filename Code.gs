@@ -14,6 +14,9 @@
  */
 
 const CFG = {
+  BOT_NAME: 'จำปี',                                  // ชื่อที่ใช้เรียกบอทในกลุ่ม
+  BOT_ALIASES: ['จำปี', 'จําปี', 'jampee', 'แจ้งงาน', 'เมนู'],  // คำขึ้นต้นที่ถือว่าเรียกบอท
+
   EMP_SHEET: 'พนักงาน',
   LOG_SHEET: 'บันทึกเวร',
   REQ_SHEET: 'คำขอ',
@@ -365,23 +368,46 @@ function apiReject_(user, p) {
 function handleLine_(events) {
   events.forEach(ev => {
     try {
-      if (ev.type === 'join') {
-        reply_(ev.replyToken, [text_('สวัสดีครับ พิมพ์ "แจ้งงาน" เพื่อเปิดเมนูตารางทำงาน')]);
+      if (ev.type === 'join' || ev.type === 'memberJoined') {
+        reply_(ev.replyToken, [text_('สวัสดีครับ ผมชื่อ ' + CFG.BOT_NAME +
+          ' ดูแลเรื่องตารางทำงาน\nพิมพ์ "' + CFG.BOT_NAME + '" เมื่อไหร่ก็ได้ เดี๋ยวผมส่งปุ่มให้กดครับ'), menuFlex_()]);
         return;
       }
       if (ev.type !== 'message' || ev.message.type !== 'text') return;
-      const t = ev.message.text.trim();
-      if (t === 'แจ้งงาน' || t === 'เมนู') reply_(ev.replyToken, [menuFlex_()]);
-      else if (t === 'ดูตารางวันนี้') reply_(ev.replyToken, [text_(scheduleText_(0))]);
-      else if (t === 'ดูตารางพรุ่งนี้') reply_(ev.replyToken, [text_(scheduleText_(1))]);
+
+      const raw = ev.message.text.trim();
+      const cmd = botCommand_(raw);
+      const isDirect = ev.source && ev.source.type === 'user';
+
+      if (cmd === null && !isDirect) return;   // ข้อความอื่นในกลุ่ม บอทจะเงียบ
+
+      const t = (cmd === null ? raw : cmd).trim();
+      if (!t || t === 'เมนู' || t === 'แจ้งงาน') reply_(ev.replyToken, [menuFlex_()]);
+      else if (t === 'ดูตารางวันนี้' || t === 'ตารางวันนี้' || t === 'วันนี้') replyQ_(ev.replyToken, scheduleText_(0));
+      else if (t === 'ดูตารางพรุ่งนี้' || t === 'ตารางพรุ่งนี้' || t === 'พรุ่งนี้') replyQ_(ev.replyToken, scheduleText_(1));
       else if (t.toLowerCase() === 'myid') {
-        reply_(ev.replyToken, [text_('userId ของคุณ:\n' + (ev.source.userId || '(ไม่พบ ลองพิมพ์ในแชทส่วนตัวกับบอท)'))]);
+        replyQ_(ev.replyToken, 'userId ของคุณ:\n' + (ev.source.userId || '(ไม่พบ ลองพิมพ์ในแชทส่วนตัวกับบอท)'));
       }
-      // ข้อความอื่นในกลุ่ม บอทจะเงียบ
+      else reply_(ev.replyToken, [menuFlex_()]);   // เรียกชื่อแล้วสั่งอะไรไม่รู้จัก ส่งเมนูให้กด
     } catch (err) {
       console.error(err);
     }
   });
+}
+
+/**
+ * ตัดชื่อบอทออกจากต้นข้อความ
+ * คืนคำสั่งที่เหลือ (อาจเป็นสตริงว่าง = เรียกชื่อเฉย ๆ) หรือ null ถ้าไม่ได้เรียกบอท
+ */
+function botCommand_(raw) {
+  const s = raw.replace(/^@/, '').trim();
+  const low = s.toLowerCase();
+  for (let i = 0; i < CFG.BOT_ALIASES.length; i++) {
+    const a = CFG.BOT_ALIASES[i].toLowerCase();
+    if (low === a) return '';
+    if (low.indexOf(a) === 0) return s.slice(a.length).replace(/^[\s,:：]+/, '');
+  }
+  return null;
 }
 
 function scheduleText_(offsetDays) {
@@ -412,17 +438,17 @@ function menuFlex_() {
     height: 'sm', margin: 'sm', action: Object.assign({ label: label }, action)
   });
   return {
-    type: 'flex', altText: 'เมนูตารางทำงาน',
+    type: 'flex', altText: 'เมนูตารางทำงาน', quickReply: quickReply_(),
     contents: {
       type: 'bubble', size: 'kilo',
       body: {
         type: 'box', layout: 'vertical', contents: [
-          { type: 'text', text: 'ตารางทำงาน', weight: 'bold', size: 'lg' },
-          { type: 'text', text: 'เลือกเรื่องที่ต้องการ', size: 'sm', color: '#5E6B61', margin: 'xs' },
+          { type: 'text', text: CFG.BOT_NAME + ' · ตารางทำงาน', weight: 'bold', size: 'lg' },
+          { type: 'text', text: 'กดปุ่มได้เลย ไม่ต้องพิมพ์', size: 'sm', color: '#5E6B61', margin: 'xs' },
           btn('แจ้งวันทำงาน', { type: 'uri', uri: liffUrl_() }, true),
           btn('รายการรออนุมัติ (HR)', { type: 'uri', uri: liffUrl_('page=approve') }),
-          btn('ดูตารางวันนี้', { type: 'message', text: 'ดูตารางวันนี้' }),
-          btn('ดูตารางพรุ่งนี้', { type: 'message', text: 'ดูตารางพรุ่งนี้' })
+          btn('ดูตารางวันนี้', { type: 'message', text: CFG.BOT_NAME + ' ตารางวันนี้' }),
+          btn('ดูตารางพรุ่งนี้', { type: 'message', text: CFG.BOT_NAME + ' ตารางพรุ่งนี้' })
         ]
       }
     }
@@ -461,6 +487,24 @@ function hrCard_(req) {
 }
 
 function text_(t) { return { type: 'text', text: String(t).slice(0, 4900) }; }
+
+/** ปุ่มลัดใต้ช่องพิมพ์ กดต่อได้เลยโดยไม่ต้องพิมพ์ชื่อบอทซ้ำ */
+function quickReply_() {
+  const item = (label, action) => ({ type: 'action', action: Object.assign({ label: label }, action) });
+  return { items: [
+    item('แจ้งวันทำงาน', { type: 'uri', uri: liffUrl_() }),
+    item('ตารางวันนี้', { type: 'message', text: CFG.BOT_NAME + ' ตารางวันนี้' }),
+    item('ตารางพรุ่งนี้', { type: 'message', text: CFG.BOT_NAME + ' ตารางพรุ่งนี้' }),
+    item('เมนู', { type: 'message', text: CFG.BOT_NAME })
+  ] };
+}
+
+/** ตอบข้อความพร้อมปุ่มลัด */
+function replyQ_(token, t) {
+  const m = text_(t);
+  m.quickReply = quickReply_();
+  return reply_(token, [m]);
+}
 
 function reply_(token, messages) { return lineApi_('message/reply', { replyToken: token, messages: messages }); }
 function push_(to, messages) { return lineApi_('message/push', { to: to, messages: messages }); }

@@ -190,5 +190,19 @@ console.log('\n=== การแจ้งเตือน LINE ===');
 ok(pushed.length >= 3, 'มีการ push หา HR และผู้แจ้ง', pushed.length);
 ok(pushed.every(m => m.to && m.to[0] === 'U'), 'push เฉพาะแชทส่วนตัว ไม่ push เข้ากลุ่ม');
 
+console.log('\n=== เรียกบอทในกลุ่มด้วยชื่อ ===');
+const say = (text, srcType) => {
+  const n = pushed.length;
+  handleLine_([{ type: 'message', replyToken: 'rt', source: { type: srcType || 'group', userId: 'U1' },
+    message: { type: 'text', text: text } }]);
+  return pushed.slice(n).map(m => (m.messages || [])[0]);
+};
+ok(say('จำปี')[0] && say('จำปี')[0].type === 'flex', 'พิมพ์ชื่อบอทเฉย ๆ ได้เมนูปุ่มกด');
+ok(say('แจ้งงาน')[0] && say('แจ้งงาน')[0].type === 'flex', 'คำเดิม "แจ้งงาน" ยังใช้ได้');
+ok(say('จำปี ตารางวันนี้')[0].text.indexOf('ตาราง') === 0, 'สั่งงานต่อท้ายชื่อบอทได้');
+ok(!!say('จำปี ตารางวันนี้')[0].quickReply, 'คำตอบมีปุ่มลัดให้กดต่อ');
+ok(say('วันนี้กินอะไรดี').length === 0, 'ข้อความอื่นในกลุ่ม บอทเงียบ');
+ok(say('อะไรก็ได้', 'user').length === 1, 'แชทส่วนตัวตอบเสมอ');
+
 console.log('\n' + (fails ? 'มีข้อทดสอบไม่ผ่าน ' + fails + ' ข้อ' : 'ผ่านทั้งหมด'));
 process.exit(fails ? 1 : 0);

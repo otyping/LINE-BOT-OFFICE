@@ -58,6 +58,7 @@
 |---|---|
 | `Code.gs` | Google Apps Script: รับ webhook จาก LINE, API ให้หน้าฟอร์ม, อ่าน/เขียนชีท, สร้างตารางรอบ |
 | `index.html` | หน้าฟอร์ม LIFF (ฝั่งหัวหน้างานและฝั่ง HR ในไฟล์เดียว) โฮสต์บน GitHub Pages |
+| `privacy.html` | นโยบายความเป็นส่วนตัว ใช้เป็น Privacy policy URL ของ LINE Login channel (บังคับตอนกด Published) |
 | `tests/mock-test.js` | จำลอง SpreadsheetApp/LINE เพื่อทดสอบ `Code.gs` ด้วย Node (`node tests/mock-test.js`) |
 | `KB_ตารางทำงาน_9-69.xlsx` | ไฟล์ตารางต้นฉบับ |
 

@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>นโยบายความเป็นส่วนตัว · ระบบตารางทำงาน</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anuphan:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#FBFCF8; --card:#FFFFFF; --ink:#1D2B21; --muted:#5E6B61; --line:#DCE3DA; --leaf:#2F6B45;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root{ --paper:#111814; --card:#18221B; --ink:#E6EEE7; --muted:#9BA89E; --line:#2B3B30; --leaf:#7CC495;
+    color-scheme:dark; }
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--paper);color:var(--ink)}
+body{font-family:'Anuphan',system-ui,-apple-system,'Segoe UI',Tahoma,sans-serif;font-size:16px;line-height:1.7}
+main{max-width:720px;margin:0 auto;padding:32px 16px 64px}
+h1{font-size:24px;margin:0 0 4px}
+h2{font-size:18px;margin:32px 0 8px;color:var(--leaf)}
+p,li{color:var(--ink)}
+ul{padding-left:20px;margin:8px 0}
+.meta{color:var(--muted);font-size:14px;margin:0 0 24px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 20px 24px}
+footer{color:var(--muted);font-size:14px;margin-top:32px;border-top:1px solid var(--line);padding-top:16px}
+</style>
+</head>
+<body>
+<main>
+  <div class="card">
+    <h1>นโยบายความเป็นส่วนตัว</h1>
+    <p class="meta">ระบบแจ้งและอนุมัติตารางทำงานผ่าน LINE · ปรับปรุงล่าสุด 25 กันยายน 2569</p>
+
+    <p>ระบบนี้เป็นเครื่องมือภายในองค์กร ใช้สำหรับให้หัวหน้างานแจ้งตารางการทำงานของพนักงาน
+    และให้ฝ่ายบุคคลพิจารณาอนุมัติ เปิดให้เฉพาะผู้ที่ได้รับสิทธิ์จากองค์กรเท่านั้น</p>
+
+    <h2>ข้อมูลที่เก็บ</h2>
+    <ul>
+      <li><strong>ข้อมูลบัญชี LINE ของผู้ใช้งานระบบ</strong> ได้แก่ รหัสผู้ใช้ (userId) และชื่อที่แสดงใน LINE
+      ใช้เพื่อยืนยันตัวตนและตรวจสิทธิ์ว่าเป็นหัวหน้างานหรือฝ่ายบุคคล</li>
+      <li><strong>ข้อมูลตารางทำงาน</strong> ได้แก่ วันที่ รหัสพนักงาน ชื่อ ช่วงเวลาทำงานหรือสถานะการลา
+      ผู้แจ้ง ผู้พิจารณา และเวลาที่บันทึก</li>
+    </ul>
+    <p>ระบบไม่เก็บรหัสผ่าน ไม่เก็บข้อมูลการชำระเงิน ไม่อ่านข้อความอื่นในห้องแชท
+    และไม่เก็บข้อมูลตำแหน่งที่ตั้ง</p>
+
+    <h2>ที่เก็บข้อมูล</h2>
+    <p>ข้อมูลทั้งหมดถูกบันทึกไว้ใน Google Sheets ขององค์กร เข้าถึงได้เฉพาะผู้ที่องค์กรให้สิทธิ์
+    ไม่มีการส่งต่อหรือขายข้อมูลให้บุคคลภายนอก และไม่มีการใช้เพื่อการโฆษณา</p>
+
+    <h2>การใช้ข้อมูล</h2>
+    <p>ใช้เพื่อจัดทำตารางการทำงาน ตรวจสอบประวัติการแจ้งและการอนุมัติ และสรุปรอบการทำงานเท่านั้น</p>
+
+    <h2>ระยะเวลาเก็บรักษา</h2>
+    <p>ข้อมูลตารางทำงานถูกเก็บไว้เป็นประวัติตามระยะเวลาที่องค์กรกำหนดสำหรับเอกสารด้านบุคคล
+    ผู้ที่พ้นสภาพพนักงานจะไม่ปรากฏในแบบฟอร์มอีก แต่ประวัติที่เคยบันทึกไว้ยังคงอยู่เพื่อการตรวจสอบย้อนหลัง</p>
+
+    <h2>สิทธิของเจ้าของข้อมูล</h2>
+    <p>พนักงานสามารถขอดู ขอแก้ไขข้อมูลที่ไม่ถูกต้อง หรือสอบถามเรื่องการใช้ข้อมูลได้
+    โดยติดต่อฝ่ายบุคคลขององค์กร</p>
+
+    <h2>ติดต่อ</h2>
+    <p>หากมีข้อสงสัยเกี่ยวกับนโยบายนี้ ติดต่อผู้ดูแลระบบผ่านฝ่ายบุคคลขององค์กร</p>
+
+    <footer>หน้านี้จัดทำขึ้นเพื่อประกอบการใช้งาน LINE Login ของระบบตารางทำงานภายในองค์กร</footer>
+  </div>
+</main>
+</body>
+</html>

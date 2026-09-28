@@ -1,0 +1,19 @@
+Use case: infographic-diagram / ads-marketing.
+Create one finished, polished Thai-language sales infographic for project “น้องจำปี”, landscape 16:9, high resolution. Use attached image as character identity reference: preserve the exact recognizable friendly Thai 3D woman, short black hair, white flower beside ear, lavender embroidered Thai blouse, cheerful smile and thumbs up. Integrate her prominently on the left 28% of the layout, with clean background removal/compositing; no photoreal humans. This is a sales one-pager summarizing a LINE shift-request and HR approval tool, not a technical manual.
+Art direction: refined warm cream #F7F6F1, forest green #2F6B45, deep green #14261C, pale sage panels #F1F5F2; amber only for pending approval. Large beautiful Thai typography resembling Kanit headings and IBM Plex Sans Thai body. Spacious professional grid, rounded cards, restrained line icons, subtle depth, high readability. Hero title top with character on left and four benefit blocks on right. Bottom full-width workflow with 3 numbered connected steps, then slim output note and strong closing strip. No fake screenshots, QR codes, metrics, price claims, AI claims, logos, or invented capabilities.
+Render ONLY these exact texts, carefully preserving Thai vowels and tone marks:
+Main title very large: "น้องจำปี"
+Subtitle: "ผู้ช่วยจัดการเวร ผ่าน LINE"
+Hero tagline: "ลดงานคีย์ซ้ำ ให้ทีมมีเวลาทำงานมากขึ้น"
+Benefits arranged 2x2 with relevant simple icons:
+"แจ้งเวรง่าย" / "เลือกวัน กะ และพนักงานหลายคนในฟอร์มเดียว"
+"HR คุมการอนุมัติ" / "ตรวจ แก้เวลา และอนุมัติผ่านมือถือ"
+"ตรวจสอบย้อนหลังได้" / "รู้ว่าใครแจ้ง ใครอนุมัติ และเมื่อไร"
+"ใช้ LINE ที่คุ้นเคย" / "ไม่ต้องติดตั้งแอปเพิ่ม"
+Workflow header: "จากแจ้งเวร สู่ข้อมูลพร้อมใช้งาน"
+Step 1: "หัวหน้าแจ้งเวร"
+Step 2: "HR ตรวจและอนุมัติ"
+Step 3: "บันทึกข้อมูลอัตโนมัติ"
+A clear small note beneath workflow: "ตารางสำหรับดูและพิมพ์: กดสร้างหรือรีเฟรชจากเมนูใน Google Sheets"
+Closing strip: "แจ้งง่าย • อนุมัติชัด • ลดงานซ้ำ"
+Do not claim printable period sheets auto-refresh, or that bot autonomously approves. The character should be beautifully integrated, not in a rectangular photo frame. All text must be legible and unclipped.

@@ -72,7 +72,9 @@ h1{font-size:22px;font-weight:600;margin:0;line-height:1.3}
 .pill{border:1px solid var(--line);background:var(--paper);border-radius:999px;padding:5px 13px;font-size:14px}
 .pill[aria-pressed=true]{background:var(--ink);border-color:var(--ink);color:var(--paper)}
 .custom{display:flex;gap:6px;margin-top:8px}
-.custom input{flex:1;min-width:0;border:1px solid var(--line);background:var(--paper);border-radius:var(--r-sm);padding:8px 10px;font-variant-numeric:tabular-nums}
+.custom label{flex:1;min-width:0;font-size:13px;color:var(--muted)}
+.custom select{display:block;width:100%;margin-top:4px;border:1px solid var(--line);background:var(--paper);color:var(--ink);border-radius:var(--r-sm);padding:8px 10px;font-size:17px;font-variant-numeric:tabular-nums}
+.custom select:disabled{opacity:.5}
 
 /* people */
 .dept{margin-top:12px}
@@ -242,6 +244,17 @@ function normShift(s){
   return (+m[1]) + '.' + m[2] + '-' + ('0' + (+m[3])).slice(-2) + '.' + m[4];
 }
 
+/* ---------- เวลาอื่น: เลือกเวลาเข้า แล้วเติมเวลาออกให้เอง ---------- */
+const TIMES = Array.from({ length: 48 }, (_, i) => i * 30); // ทุก 30 นาที
+const toMin = t => { const [h, m] = t.split('.'); return +h * 60 + +m; };
+const fmtT = (min, pad) => { const h = Math.floor(min / 60) % 24; return (pad ? ('0' + h).slice(-2) : h) + '.' + ('0' + min % 60).slice(-2); };
+/* เข้าก่อน 10.00 = 9 ชม. (รวมพัก) นอกนั้น 8 ชม. ตรงกับกะสำเร็จรูปทุกกะ เช่น 8.00-17.00, 10.00-18.00 */
+const autoEnd = start => (start + (start < 600 ? 9 : 8) * 60) % 1440;
+function timeOptions(cur, pad){
+  return (cur ? '' : '<option value="">เลือก</option>')
+    + TIMES.map(t => { const v = fmtT(t, pad); return `<option ${v===cur?'selected':''}>${v}</option>`; }).join('');
+}
+
 /* ---------- render ---------- */
 function render(scrollDate){
   if (S.page === 'approve') return renderApprove();
@@ -296,7 +309,10 @@ function activeGroup(g, i){
       <div class="t">${s}</div>${bar(s)}</button>`).join('');
   const st = d.statuses.map(s => `<button class="pill" data-act="shift" data-v="${s}" aria-pressed="${g.shift===s}">${s}</button>`).join('')
     + `<button class="pill" data-act="custom" aria-pressed="${g.custom}">เวลาอื่น</button>`;
-  const custom = g.custom ? `<div class="custom"><input id="cust" inputmode="decimal" placeholder="เช่น 7.00-16.00" value="${esc(g.shift||'')}" aria-label="เวลาเข้า-ออก"></div>` : '';
+  const [cin, cout] = (normShift(g.shift) || '-').split('-');
+  const custom = g.custom ? `<div class="custom">
+      <label>เข้า<select id="cin" aria-label="เวลาเข้า">${timeOptions(cin)}</select></label>
+      <label>ออก<select id="cout" aria-label="เวลาออก" ${cin ? '' : 'disabled'}>${timeOptions(cout, true)}</select></label></div>` : '';
 
   const byDept = {};
   d.employees.forEach(e => (byDept[e.dept] = byDept[e.dept] || []).push(e));
@@ -340,10 +356,9 @@ function collect(){
   const groups = S.groups.filter(g => g.codes.size);
   for (const g of groups) {
     if (!g.shift) return { err: 'ยังไม่ได้เลือกเวลาของกะที่มี ' + g.codes.size + ' คน' };
-    if (g.custom && !S.d.statuses.includes(g.shift) && !normShift(g.shift)) return { err: 'รูปแบบเวลา "' + g.shift + '" ไม่ถูกต้อง ตัวอย่าง 7.00-16.00' };
   }
   const lab = c => (S.d.employees.find(e => e.code === c) || {}).label || c;
-  return { groups: groups.map(g => ({ shift: g.custom ? (normShift(g.shift) || g.shift) : g.shift, codes: [...g.codes], names: [...g.codes].map(lab) })) };
+  return { groups: groups.map(g => ({ shift: g.shift, codes: [...g.codes], names: [...g.codes].map(lab) })) };
 }
 
 function openReview(){
@@ -454,7 +469,7 @@ document.addEventListener('click', e => {
   switch (act) {
     case 'date': setDate(v); break;
     case 'shift': g.shift = v; g.custom = false; render(); break;
-    case 'custom': { g.custom = true; if (S.d.shifts.includes(g.shift) || S.d.statuses.includes(g.shift)) g.shift = ''; render(); const inp = $('#cust'); if (inp) inp.focus(); break; }
+    case 'custom': g.custom = true; if (S.d.statuses.includes(g.shift)) g.shift = null; render(); break; // เวลาของกะที่กดไว้ก่อนหน้าใช้เป็นค่าเริ่มต้น
     case 'person': { const o = owner(v); if (o === S.active) g.codes.delete(v); else { if (o >= 0) S.groups[o].codes.delete(v); g.codes.add(v); } render(); break; }
     case 'dept': S.openDept.has(v) ? S.openDept.delete(v) : S.openDept.add(v); render(); break;
     case 'addgroup': S.groups.push(newGroup()); S.active = S.groups.length - 1; render(); break;
@@ -484,12 +499,12 @@ document.addEventListener('change', e => {
     if (el.value === en.shift) delete S.edits[r.id][en.code]; else S.edits[r.id][en.code] = el.value;
     renderApprove();
   }
-});
-document.addEventListener('input', e => {
-  if (e.target.id === 'cust') S.groups[S.active].shift = e.target.value;
-});
-document.addEventListener('focusout', e => {
-  if (e.target.id === 'cust') { const n = normShift(e.target.value); if (n) { S.groups[S.active].shift = n; } }
+  if (el.id === 'cin' || el.id === 'cout') {
+    /* เปลี่ยนเวลาเข้า = เติมเวลาออกให้ใหม่ทุกครั้ง ส่วนเวลาออกแก้เองได้ถ้าไม่ตรง */
+    const a = $('#cin').value;
+    S.groups[S.active].shift = a ? a + '-' + (el.id === 'cout' ? el.value : fmtT(autoEnd(toMin(a)), true)) : null;
+    render();
+  }
 });
 
 boot();

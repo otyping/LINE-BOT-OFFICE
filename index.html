@@ -68,10 +68,10 @@ h1{font-size:22px;font-weight:600;margin:0;line-height:1.3}
 .bar::before{left:25%}.bar::after{left:75%}
 .tile[aria-pressed=true]{border-color:var(--leaf);box-shadow:inset 0 0 0 1px var(--leaf);background:var(--sprout)}
 .tile[aria-pressed=true] .t{color:var(--sprout-ink)}
-.statuses{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.statuses{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
 .pill{border:1px solid var(--line);background:var(--paper);border-radius:999px;padding:5px 13px;font-size:14px}
 .pill[aria-pressed=true]{background:var(--ink);border-color:var(--ink);color:var(--paper)}
-.custom{display:flex;gap:6px;margin-top:8px}
+.custom{display:flex;gap:6px}
 .custom label{flex:1;min-width:0;font-size:13px;color:var(--muted)}
 .custom select{display:block;width:100%;margin-top:4px;border:1px solid var(--line);background:var(--paper);color:var(--ink);border-radius:var(--r-sm);padding:8px 10px;font-size:17px;font-variant-numeric:tabular-nums}
 .custom select:disabled{opacity:.5}
@@ -166,7 +166,7 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const pd = ymd => { const [y,m,d] = ymd.split('-').map(Number); return new Date(y, m-1, d); };
 const longDate = ymd => { const x = pd(ymd); return 'วัน' + TH_DL[x.getDay()] + 'ที่ ' + x.getDate() + ' ' + TH_M[x.getMonth()] + ' ' + (x.getFullYear()+543); };
-const newGroup = () => ({ shift:null, custom:false, codes:new Set() });
+const newGroup = () => ({ shift:null, codes:new Set() });
 
 function toast(msg){ const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2600); }
 
@@ -244,7 +244,7 @@ function normShift(s){
   return (+m[1]) + '.' + m[2] + '-' + ('0' + (+m[3])).slice(-2) + '.' + m[4];
 }
 
-/* ---------- เวลาอื่น: เลือกเวลาเข้า แล้วเติมเวลาออกให้เอง ---------- */
+/* ---------- เลือกเวลาเอง: เลือกเวลาเข้า แล้วเติมเวลาออกให้เอง ---------- */
 const TIMES = Array.from({ length: 48 }, (_, i) => i * 30); // ทุก 30 นาที
 const toMin = t => { const [h, m] = t.split('.'); return +h * 60 + +m; };
 const fmtT = (min, pad) => { const h = Math.floor(min / 60) % 24; return (pad ? ('0' + h).slice(-2) : h) + '.' + ('0' + min % 60).slice(-2); };
@@ -305,14 +305,13 @@ function renderForm(){
 
 function activeGroup(g, i){
   const d = S.d;
-  const tiles = d.shifts.map(s => `<button class="tile" data-act="shift" data-v="${s}" aria-pressed="${g.shift===s && !g.custom}">
+  const tiles = d.shifts.map(s => `<button class="tile" data-act="shift" data-v="${s}" aria-pressed="${g.shift===s}">
       <div class="t">${s}</div>${bar(s)}</button>`).join('');
-  const st = d.statuses.map(s => `<button class="pill" data-act="shift" data-v="${s}" aria-pressed="${g.shift===s}">${s}</button>`).join('')
-    + `<button class="pill" data-act="custom" aria-pressed="${g.custom}">เวลาอื่น</button>`;
+  const st = d.statuses.map(s => `<button class="pill" data-act="shift" data-v="${s}" aria-pressed="${g.shift===s}">${s}</button>`).join('');
   const [cin, cout] = (normShift(g.shift) || '-').split('-');
-  const custom = g.custom ? `<div class="custom">
+  const custom = `<div class="label">หรือเลือกเวลาเอง</div><div class="custom">
       <label>เข้า<select id="cin" aria-label="เวลาเข้า">${timeOptions(cin)}</select></label>
-      <label>ออก<select id="cout" aria-label="เวลาออก" ${cin ? '' : 'disabled'}>${timeOptions(cout, true)}</select></label></div>` : '';
+      <label>ออก<select id="cout" aria-label="เวลาออก" ${cin ? '' : 'disabled'}>${timeOptions(cout, true)}</select></label></div>`;
 
   const byDept = {};
   d.employees.forEach(e => (byDept[e.dept] = byDept[e.dept] || []).push(e));
@@ -333,8 +332,8 @@ function activeGroup(g, i){
   return `<section class="group" aria-label="กะที่ ${i+1}">
     <div class="ghead"><h2>กะที่ ${i+1}</h2>${S.groups.length > 1 ? `<button class="x" data-act="delgroup" data-v="${i}">ลบกะนี้</button>` : ''}</div>
     <div class="label">เวลาเข้า-ออก</div>
-    <div class="shifts">${tiles}</div>
-    <div class="statuses">${st}</div>${custom}
+    <div class="shifts">${tiles}</div>${custom}
+    <div class="statuses">${st}</div>
     <div class="label">พนักงาน</div>${depts}</section>`;
 }
 
@@ -468,8 +467,7 @@ document.addEventListener('click', e => {
   if (act === 'closesheet' && e.target !== el) return; // คลิกในแผ่นไม่ปิด
   switch (act) {
     case 'date': setDate(v); break;
-    case 'shift': g.shift = v; g.custom = false; render(); break;
-    case 'custom': g.custom = true; if (S.d.statuses.includes(g.shift)) g.shift = null; render(); break; // เวลาของกะที่กดไว้ก่อนหน้าใช้เป็นค่าเริ่มต้น
+    case 'shift': g.shift = v; render(); break;
     case 'person': { const o = owner(v); if (o === S.active) g.codes.delete(v); else { if (o >= 0) S.groups[o].codes.delete(v); g.codes.add(v); } render(); break; }
     case 'dept': S.openDept.has(v) ? S.openDept.delete(v) : S.openDept.add(v); render(); break;
     case 'addgroup': S.groups.push(newGroup()); S.active = S.groups.length - 1; render(); break;

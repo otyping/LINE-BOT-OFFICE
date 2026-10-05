@@ -156,7 +156,8 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const pd = ymd => { const [y,m,d] = ymd.split('-').map(Number); return new Date(y, m-1, d); };
 const longDate = ymd => { const x = pd(ymd); return 'วัน' + TH_DL[x.getDay()] + 'ที่ ' + x.getDate() + ' ' + TH_M[x.getMonth()] + ' ' + (x.getFullYear()+543); };
-const newGroup = () => ({ shift:null, codes:new Set() });
+const todayYmd = () => { const x = new Date(); return x.getFullYear() + '-' + ('0' + (x.getMonth()+1)).slice(-2) + '-' + ('0' + x.getDate()).slice(-2); };
+const newGroup =() => ({ shift:null, codes:new Set() });
 
 function toast(msg){ const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2600); }
 
@@ -347,9 +348,11 @@ function openReview(){
   $('#overlay').innerHTML = `<div class="scrim" data-act="closesheet"><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="rv">
     <h2 id="rv">ตรวจสอบก่อนส่ง</h2><p class="note">${esc(longDate(S.date))}</p>
     <div class="sum">${c.groups.map(g => `<div><b>${esc(g.shift)}</b> <span class="sub">${g.names.length} คน</span><p>${esc(g.names.join(', '))}</p></div>`).join('')}</div>
-    <p class="note">คำขอจะส่งถึงหัวหน้า HR ระหว่างรอ ตารางจะขึ้นว่า (รอ) จนกว่าจะอนุมัติ</p>
+    <p class="note">${S.d.user.role === 'HR' ? 'HR แจ้งเอง จะลงตารางทันที ไม่ต้องรออนุมัติ' : S.date < todayYmd()
+      ?'วันย้อนหลัง: คนที่ยังไม่มีเวรในวันนั้นจะลงตารางทันที ส่วนคนที่มีเวรอยู่แล้วจะส่งให้หัวหน้า HR อนุมัติก่อน'
+      : 'คำขอจะส่งถึงหัวหน้า HR ระหว่างรอ ตารางจะขึ้นว่า (รอ) จนกว่าจะอนุมัติ'}</p>
     <div class="row2"><button class="ghost" data-act="closesheet">แก้ไข</button>
-    <button class="primary" data-act="submit" ${S.busy ? 'disabled' : ''}>${S.busy ? 'กำลังส่ง…' : 'ส่งขออนุมัติ'}</button></div></div></div>`;
+    <button class="primary" data-act="submit" ${S.busy ? 'disabled' : ''}>${S.busy ? 'กำลังส่ง…' : 'ส่ง'}</button></div></div></div>`;
 }
 function closeSheet(){ $('#overlay').innerHTML = ''; }
 
@@ -359,22 +362,26 @@ async function submit(){
   S.busy = true; openReview();
   try {
     const r = await api('submit', { date: S.date, groups: c.groups.map(g => ({ shift: g.shift, codes: g.codes })) });
-    const text = `ขออนุมัติตาราง ${r.dateLabel} (#${r.id})\n` + r.groups.map(g => `${g.shift}: ${g.names.join(', ')}`).join('\n');
+    const lines = gs => gs.map(g => `${g.shift}: ${g.names.join(', ')}`).join('\n');
+    const text = [r.saved ? `บันทึกตาราง ${r.dateLabel} (#${r.saved.id})\n` + lines(r.saved.groups) : '',
+                  r.id ? `ขออนุมัติตาราง ${r.dateLabel} (#${r.id})\n` + lines(r.groups) : ''].filter(Boolean).join('\n\n');
     try { const ctx = liff.getContext(); if (ctx && ['group','room','utou'].includes(ctx.type)) await liff.sendMessages([{ type:'text', text }]); } catch (e) {}
     closeSheet(); showDone(r);
   } catch (e) { toast(e.message); openReview(); }
-  finally { S.busy = false; const b = $('[data-act=submit]'); if (b) { b.disabled = false; b.textContent = 'ส่งขออนุมัติ'; } }
+  finally { S.busy = false; const b = $('[data-act=submit]'); if (b) { b.disabled = false; b.textContent = 'ส่ง'; } }
 }
 
 function showDone(r){
+  const sum = gs => gs.map(g => `<div><b>${esc(g.shift)}</b><p>${esc(g.names.join(', '))}</p></div>`).join('');
   S.page = 'done';
   bottom('');
   $('#app').innerHTML = `<div class="done">
     <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="24" cy="24" r="21"/><path d="M14 24.5l7 7 13-14"/></svg>
-    <h2>ส่งขออนุมัติแล้ว</h2><p class="sub">คำขอ #${esc(r.id)} ตาราง ${esc(r.dateLabel)}</p>
-    <div class="sum">${r.groups.map(g => `<div><b>${esc(g.shift)}</b><p>${esc(g.names.join(', '))}</p></div>`).join('')}</div>
+    <h2>${r.id ? 'ส่งขออนุมัติแล้ว' : 'บันทึกลงตารางแล้ว'}</h2><p class="sub">ตาราง ${esc(r.dateLabel)}</p>
+    ${r.saved ? `<p class="note">ลงตารางแล้ว ไม่ต้องรออนุมัติ (#${esc(r.saved.id)})</p><div class="sum">${sum(r.saved.groups)}</div>` : ''}
+    ${r.id ? `<p class="note">รอหัวหน้า HR อนุมัติ (#${esc(r.id)})</p><div class="sum">${sum(r.groups)}</div>` : ''}
     ${(r.warnings||[]).map(w => `<div class="warn">${esc(w)}</div>`).join('')}
-    <p class="note">หัวหน้า HR ได้รับแจ้งแล้ว เมื่ออนุมัติ บอทจะส่งข้อความบอกคุณ</p>
+    ${r.id ? '<p class="note">หัวหน้า HR ได้รับแจ้งแล้ว เมื่ออนุมัติ บอทจะส่งข้อความบอกคุณ</p>' : ''}
     <div class="row2"><button class="ghost" data-act="again">แจ้งวันอื่นต่อ</button><button class="primary" data-act="close">ปิด</button></div></div>`;
 }
 

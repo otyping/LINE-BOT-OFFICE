@@ -25,7 +25,7 @@ const CFG = {
   LEGACY_SHEET: 'รหัสพนักงาน',   // ชีทเดิมแนวกว้าง ใช้ตอนย้ายข้อมูลครั้งเดียว
 
   CUT_DAY: 26,                  // รอบสรุป = วันที่ 26 เดือนก่อน ถึง 25 เดือนนี้
-  BACK_DAYS: 7,                 // ฟอร์มให้แจ้งย้อนหลังได้กี่วัน
+  BACK_DAYS: 14,                // ฟอร์มให้แจ้งย้อนหลังได้กี่วัน
   AHEAD_PERIODS: 1,             // ฟอร์มให้แจ้งล่วงหน้าอีกกี่รอบ
 
   SHIFTS: ['8.00-17.00', '10.00-18.00', '14.00-22.00', '18.00-02.00',
@@ -37,6 +37,7 @@ const CFG = {
 
   ST_PENDING: 'รออนุมัติ',
   ST_OK: 'อนุมัติ',
+  AUTO_BY: 'อัตโนมัติ (แจ้งย้อนหลัง)',   // ผู้พิจารณาของเวรย้อนหลังที่ลงตารางโดยไม่ผ่าน HR
   ST_NO: 'ไม่อนุมัติ',
   ST_OLD: 'แทนที่',             // ถูกคำขอที่อนุมัติทีหลังเขียนทับ
   PENDING: '(รอ) '
@@ -246,46 +247,81 @@ function apiSubmit_(user, p) {
     });
     if (!entries.length) throw new Error('ยังไม่ได้เลือกพนักงาน');
 
-    const state = dayState_(readLog_(), p.date);
+    const log = readLog_();
+    const state = dayState_(log, p.date);
+    entries.forEach(en => { en.old = (state[en.code] || {}).ok ? state[en.code].ok.shift : ''; });
+
+    // HR แจ้งเอง ลงตารางได้เลยทุกกรณี
+    // หัวหน้างานแจ้งย้อนหลังในวันที่คนนั้นยังไม่มีเวร (ลืมแจ้ง) ก็ลงตารางได้เลย
+    // ส่วนการแก้เวรที่อนุมัติไว้แล้ว และวันนี้เป็นต้นไป ยังต้องผ่าน HR
+    const isHr = user.role === CFG.ROLE_HR;
+    const retro = p.date < ymd_(new Date());
+    const direct = isHr ? entries : (retro ? entries.filter(en => !en.old) : []);
+    const wait = entries.filter(en => direct.indexOf(en) < 0);
+
     const warnings = [];
-    entries.forEach(en => {
+    wait.forEach(en => {
       const s = state[en.code] || {};
-      en.old = s.ok ? s.ok.shift : '';
       if (s.pending) warnings.push(en.label + ': มีคำขออื่นรออยู่ (#' + s.pending.reqId + ') คำขอนี้จะแทนที่เมื่ออนุมัติ');
     });
 
-    const id = nextId_();
-    const now = new Date();
-    appendLog_(entries.map(en => {
-      const row = [];
-      row[LOG_COL.ymd - 1] = p.date;
-      row[LOG_COL.code - 1] = en.code;
-      row[LOG_COL.label - 1] = en.label;
-      row[LOG_COL.shift - 1] = en.shift;
-      row[LOG_COL.status - 1] = CFG.ST_PENDING;
-      row[LOG_COL.reqId - 1] = id;
-      row[LOG_COL.by - 1] = user.name;
-      row[LOG_COL.approver - 1] = '';
-      row[LOG_COL.at - 1] = now;
-      return row;
-    }));
-
-    ss_().getSheetByName(CFG.REQ_SHEET).appendRow([
-      id, now, user.userId, user.name, p.date, summaryText_(entries),
-      JSON.stringify(entries), JSON.stringify(warnings), CFG.ST_PENDING, '', '', ''
-    ]);
+    const out = { ok: true, id: null, dateLabel: thDate_(p.date, true), groups: [], warnings: warnings, saved: null };
+    if (direct.length) {
+      // เวรที่อนุมัติไว้ก่อนหน้าของคน-วันเดียวกัน ถือว่าถูกแทนที่ (เกิดได้เฉพาะตอน HR แจ้งเอง)
+      const now = new Date();
+      log.forEach(r => {
+        if (r.ymd === p.date && r.status === CFG.ST_OK && direct.some(en => en.code === r.code)) {
+          setLogStatus_(r.row, CFG.ST_OLD, user.name, now);
+        }
+      });
+      const sid = isHr
+        ? saveReq_(user, p.date, direct, [], CFG.ST_OK, user.name, 'HR แจ้งเอง ไม่ต้องขออนุมัติ')
+        : saveReq_(user, p.date, direct, [], CFG.ST_OK, CFG.AUTO_BY, 'แจ้งย้อนหลังในวันที่ยังไม่มีเวร ไม่ต้องขออนุมัติ');
+      out.saved = { id: sid, groups: groupByShift_(direct) };
+    }
+    if (wait.length) {
+      out.id = saveReq_(user, p.date, wait, warnings, CFG.ST_PENDING, '', '');
+      out.groups = groupByShift_(wait);
+    }
     SpreadsheetApp.flush();
 
-    const req = { id: id, fromName: user.name, date: p.date, entries: entries, warnings: warnings };
-    try {
-      hrUsers_().forEach(h => push_(h.userId, [hrCard_(req)]));
-    } catch (err) {
-      console.error('แจ้ง HR ไม่สำเร็จ', err);
+    if (wait.length) {
+      const req = { id: out.id, fromName: user.name, date: p.date, entries: wait, warnings: warnings };
+      try {
+        hrUsers_().forEach(h => push_(h.userId, [hrCard_(req)]));
+      } catch (err) {
+        console.error('แจ้ง HR ไม่สำเร็จ', err);
+      }
     }
-    return { ok: true, id: id, dateLabel: thDate_(p.date, true), groups: groupByShift_(entries), warnings: warnings };
+    return out;
   } finally {
     lock.releaseLock();
   }
+}
+
+/** เขียนคำขอ 1 ใบลงบันทึกเวรและชีทคำขอ คืนเลขคำขอ ถ้ามี approver แปลว่าลงเป็นอนุมัติทันที */
+function saveReq_(user, date, entries, warnings, status, approver, note) {
+  const id = nextId_();
+  const now = new Date();
+  appendLog_(entries.map(en => {
+    const row = [];
+    row[LOG_COL.ymd - 1] = date;
+    row[LOG_COL.code - 1] = en.code;
+    row[LOG_COL.label - 1] = en.label;
+    row[LOG_COL.shift - 1] = en.shift;
+    row[LOG_COL.status - 1] = status;
+    row[LOG_COL.reqId - 1] = id;
+    row[LOG_COL.by - 1] = user.name;
+    row[LOG_COL.approver - 1] = approver;
+    row[LOG_COL.at - 1] = now;
+    return row;
+  }));
+  ss_().getSheetByName(CFG.REQ_SHEET).appendRow([
+    id, now, user.userId, user.name, date, summaryText_(entries),
+    JSON.stringify(entries), JSON.stringify(warnings), status,
+    approver, approver ? now : '', note
+  ]);
+  return id;
 }
 
 function apiApprove_(user, p) {

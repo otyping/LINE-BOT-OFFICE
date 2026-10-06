@@ -165,7 +165,24 @@ function toast(msg){ const t = $('#toast'); t.textContent = msg; t.classList.add
    ส่วน submit/approve/reject ห้ามลองซ้ำ เพราะอาจสำเร็จไปแล้วแล้วกลายเป็นคำขอซ้อน */
 const RETRYABLE = ['init', 'pending'];
 
+/* ID token ของ LINE มีอายุราว 1 ชั่วโมง แต่ LIFF จำการล็อกอินไว้นานกว่านั้น (โดยเฉพาะเปิดในเบราว์เซอร์นอกแอป)
+   ถ้า token หมดอายุ ต้องล็อกอินใหม่เพื่อขอ token ใหม่ ไม่อย่างนั้นฝั่ง Apps Script จะยืนยันตัวตนไม่ผ่าน
+   คืน true ถ้า token ยังใช้ได้ คืน false ถ้ากำลังพาไปล็อกอินใหม่ */
+function freshToken(){
+  const t = liff.getDecodedIDToken();
+  if (t && t.exp && t.exp * 1000 > Date.now() + 60000) {
+    sessionStorage.removeItem('relogin');
+    return true;
+  }
+  if (sessionStorage.getItem('relogin')) return true;   // เพิ่งล็อกอินใหม่มาแล้ว ไม่วนซ้ำ ปล่อยให้เซิร์ฟเวอร์ตอบ error เอง
+  sessionStorage.setItem('relogin', '1');
+  if (liff.isInClient()) location.reload();             // ในแอป LINE แค่โหลดใหม่ก็ได้ token ใหม่
+  else { liff.logout(); liff.login({ redirectUri: location.href }); }
+  return false;
+}
+
 async function api(action, payload = {}){
+  if (!freshToken()) throw new Error('หมดเวลาการเข้าสู่ระบบ กำลังเข้าสู่ระบบใหม่ กรุณาทำรายการอีกครั้ง');
   const body = JSON.stringify(Object.assign({ action, idToken: liff.getIDToken() }, payload));
   const tries = RETRYABLE.includes(action) ? 3 : 1;
   let last = 'เกิดข้อผิดพลาด';
@@ -195,6 +212,7 @@ async function boot(){
   try {
     await liff.init({ liffId: CONFIG.LIFF_ID });
     if (!liff.isLoggedIn()) { liff.login({ redirectUri: location.href }); return; }
+    if (!freshToken()) return;
     const q = new URLSearchParams(location.search);
     const d = await api('init');
     S.d = d;

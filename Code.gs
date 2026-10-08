@@ -98,6 +98,7 @@ function setup() {
     sh.setFrozenRows(1);
     sh.setColumnWidth(2, 180);
   }
+  markDuplicateCodes_();
 
   if (!ss.getSheetByName(CFG.LOG_SHEET)) {
     const sh = ss.insertSheet(CFG.LOG_SHEET);
@@ -147,6 +148,22 @@ function setup() {
   checkSetup();
 }
 
+/**
+ * รหัสพนักงานที่ซ้ำกันในคอลัมน์ A ของชีทพนักงาน ขึ้นพื้นแดงทุกช่องที่ซ้ำ
+ * เทียบแบบข้อความหลังตัดช่องว่าง เหมือนที่ readEmployees_ อ่าน (013 กับ 13 ไม่ถือว่าซ้ำ) รันซ้ำได้ ไม่เพิ่มกฎซ้อน
+ */
+function markDuplicateCodes_() {
+  const sh = need_(CFG.EMP_SHEET);
+  const formula = '=AND($A2<>"",SUMPRODUCT(--(TRIM($A$2:$A)=TRIM($A2)))>1)';
+  const rules = sh.getConditionalFormatRules().filter(r => {
+    const b = r.getBooleanCondition();
+    return !(b && b.getCriteriaType() === SpreadsheetApp.BooleanCriteria.CUSTOM_FORMULA && b.getCriteriaValues()[0] === formula);
+  });
+  rules.push(SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied(formula)
+    .setBackground('#EA4335').setFontColor('#FFFFFF').setRanges([sh.getRange('A2:A')]).build());
+  sh.setConditionalFormatRules(rules);
+}
+
 /** ตรวจว่าอ่านชีทได้ถูกต้อง ดูผลใน Execution log */
 function checkSetup() {
   const log = [];
@@ -171,6 +188,10 @@ function checkSetup() {
 
   const left = emps.filter(e => e.to && e.to < today);
   if (left.length) say('ลาออกแล้ว (ไม่แสดงในฟอร์ม แต่ประวัติยังอยู่): ' + left.map(e => e.label).join(', '));
+
+  const dupCode = {};
+  emps.forEach(e => (dupCode[e.code] = (dupCode[e.code] || 0) + 1));
+  Object.keys(dupCode).filter(k => dupCode[k] > 1).forEach(k => warn('รหัสพนักงานซ้ำ: ' + k + ' มี ' + dupCode[k] + ' แถว (ช่องที่ซ้ำขึ้นสีแดงในชีท ต้องแก้ให้ไม่ซ้ำ)'));
 
   const dup = {};
   active.forEach(e => (dup[e.label] = (dup[e.label] || 0) + 1));

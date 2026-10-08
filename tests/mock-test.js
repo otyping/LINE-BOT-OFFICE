@@ -43,6 +43,7 @@ Sheet.prototype.clear = function () { this.g = []; this.notes = {}; this.fmt = {
 Sheet.prototype.getMaxRows = function () { return Math.max(this.g.length, 1000); };
 Sheet.prototype.getMaxColumns = function () { return Math.max(this.getLastColumn(), 26); };
 Sheet.prototype.clearConditionalFormatRules = function () { this.rules = []; };
+Sheet.prototype.getConditionalFormatRules = function () { return this.rules.slice(); };
 Sheet.prototype.setConditionalFormatRules = function (r) { this.rules = r; };
 ['setFrozenRows', 'setColumnWidth'].forEach(m => (Sheet.prototype[m] = function () { return this; }));
 // Google Sheets จะ error ถ้าตรึงคอลัมน์ผ่ากลางเซลล์ที่ merge ไว้ จำลองไว้กันบั๊กซ้ำ
@@ -65,10 +66,15 @@ global.SpreadsheetApp = {
   }),
   flush() {},
   newDataValidation: () => ({ requireValueInList() { return this; }, build() { return {}; } }),
+  BooleanCriteria: { CUSTOM_FORMULA: 'CUSTOM_FORMULA' },
   newConditionalFormatRule: () => ({
     whenTextStartsWith() { return this; }, whenTextEqualTo() { return this; },
+    whenFormulaSatisfied(f) { this.f = f; return this; },
     setBackground() { return this; }, setFontColor() { return this; }, setRanges() { return this; },
-    build() { return {}; }
+    build() {
+      const f = this.f;
+      return { getBooleanCondition: () => f ? { getCriteriaType: () => 'CUSTOM_FORMULA', getCriteriaValues: () => [f] } : null };
+    }
   })
 };
 global.Utilities = {
@@ -137,6 +143,12 @@ ok(logRows().length === before, 'รันย้ำแล้วไม่เพ�
 
 console.log('\n=== ตรวจการตั้งค่า ===');
 console.log(checkSetup());
+const empRules = sheets['พนักงาน'].rules;
+ok(empRules.length === 1 && empRules[0].getBooleanCondition().getCriteriaValues()[0].includes('TRIM($A2)'),
+  'ชีทพนักงานมีกฎสีแดงสำหรับรหัสซ้ำ กฎเดียวแม้รัน setup หลายรอบ', empRules.length);
+sheets['พนักงาน'].g.push([' 013 ', 'คนรหัสซ้ำ']);
+ok(checkSetup().includes('รหัสพนักงานซ้ำ: 013 มี 2 แถว'), 'ตรวจการตั้งค่าเตือนเมื่อรหัสพนักงานซ้ำ');
+sheets['พนักงาน'].g.pop();
 
 console.log('\n=== หัวหน้างานแจ้งวันทำงาน (ไม่ต้องขออนุมัติ) ===');
 let r = handleApi_({ action: 'init', idToken: 'x' });

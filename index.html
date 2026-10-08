@@ -312,8 +312,8 @@ function normShift(s){
 const TIMES = Array.from({ length: 48 }, (_, i) => i * 30); // ทุก 30 นาที
 const toMin = t => { const [h, m] = t.split('.'); return +h * 60 + +m; };
 const fmtT = (min, pad) => { const h = Math.floor(min / 60) % 24; return (pad ? ('0' + h).slice(-2) : h) + '.' + ('0' + min % 60).slice(-2); };
-/* เข้าก่อน 10.00 = 9 ชม. (รวมพัก) นอกนั้น 8 ชม. เช่น 8.00-17.00, 10.00-18.00, 21.00-05.00 */
-const autoEnd = start => (start + (start < 600 ? 9 : 8) * 60) % 1440;
+/* เข้าก่อน 14.00 = 9 ชม. (รวมพัก) ตั้งแต่ 14.00 = 8 ชม. เช่น 8.00-17.00, 13.00-22.00, 14.00-22.00, 21.00-05.00 */
+const autoEnd = start => (start + (start < 840 ? 9 : 8) * 60) % 1440;
 function timeOptions(cur, pad){
   return (cur ? '' : '<option value="">เลือก</option>')
     + TIMES.map(t => { const v = fmtT(t, pad); return `<option ${v===cur?'selected':''}>${v}</option>`; }).join('');

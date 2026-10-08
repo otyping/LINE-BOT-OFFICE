@@ -9,7 +9,7 @@ const fs = require('fs');
 const path = require('path');
 
 /* ---------- จำลอง Spreadsheet ---------- */
-function Sheet(name, grid) { this.name = name; this.g = grid || []; this.notes = {}; this.rules = []; this.merges = []; }
+function Sheet(name, grid) { this.name = name; this.g = grid || []; this.notes = {}; this.rules = []; this.merges = []; this.fmt = {}; }
 Sheet.prototype.getName = function () { return this.name; };
 Sheet.prototype.getLastRow = function () { return this.g.length; };
 Sheet.prototype.getLastColumn = function () { return Math.max(0, ...this.g.map(r => (r || []).length)); };
@@ -32,13 +32,14 @@ Sheet.prototype.getRange = function (r, c, nr, nc) {
     merge() { s.merges.push({ c: c, nc: nc }); return this; },
     breakApart() { s.merges = s.merges.filter(m => m.c < c || m.c + m.nc - 1 > c + nc - 1); return this; }
   };
-  ['setFontWeight', 'setNumberFormat', 'setDataValidation', 'setHorizontalAlignment',
+  api.setNumberFormat = f => { s.fmt[[r, c, nr, nc].join()] = f; return api; };
+  ['setFontWeight', 'setDataValidation', 'setHorizontalAlignment',
    'setBackground', 'setBackgrounds', 'setFontColor', 'setFontSize'].forEach(m => (api[m] = () => api));
   return api;
 };
 Sheet.prototype.getDataRange = function () { return this.getRange(1, 1, Math.max(this.g.length, 1), Math.max(this.getLastColumn(), 1)); };
 Sheet.prototype.appendRow = function (r) { this.g.push(r); };
-Sheet.prototype.clear = function () { this.g = []; this.notes = {}; return this; };
+Sheet.prototype.clear = function () { this.g = []; this.notes = {}; this.fmt = {}; return this; };
 Sheet.prototype.getMaxRows = function () { return Math.max(this.g.length, 1000); };
 Sheet.prototype.getMaxColumns = function () { return Math.max(this.getLastColumn(), 26); };
 Sheet.prototype.clearConditionalFormatRules = function () { this.rules = []; };
@@ -219,8 +220,9 @@ buildCurrentPeriod();
 const p = period_(fmt(today));
 const view = sheets[CFG.VIEW_PREFIX + p.key];
 ok(!!view, 'สร้างชีท ' + CFG.VIEW_PREFIX + p.key);
-ok(view.g[1].length === 5 + 31 || view.g[1].length === 5 + 30 || view.g[1].length === 5 + 29,
-  'หัวตารางมีคอลัมน์วันครบทั้งรอบ', view.g[1].length - 5);
+ok(view.g[1].length >= 4 + 28 && view.g[1].length <= 4 + 31, 'หัวตารางมีคอลัมน์วันครบทั้งรอบ', view.g[1].length - 4);
+ok(view.g[1].indexOf('ชื่อในกลุ่มไลน์') < 0 && view.g[1].slice(0, 4).join() === 'รหัส,ชื่อ - สกุล,แผนก,ชื่อเล่น', 'ชีทรอบไม่มีคอลัมน์ชื่อในกลุ่มไลน์', view.g[1].slice(0, 4));
+ok(view.fmt[[4, 1, 2, 1].join()] === '@' && view.g.slice(3).some(x => x && x[0] === '013'), 'คอลัมน์รหัสเป็นข้อความ รหัส 013 ไม่กลายเป็น 13');
 ok(view.g[1].indexOf('ค่าแรง') < 0 && sheets['พนักงาน'].g[0].indexOf('ค่าแรง') < 0, 'ไม่มีคอลัมน์ค่าแรงในชีทรอบและชีทพนักงาน');
 ok(view.g.slice(3).some(row => row && row.indexOf('8.00-17.00') >= 0), 'ตารางดึงค่าจากบันทึกเวรมาแสดง');
 buildCurrentPeriod();
@@ -298,7 +300,8 @@ buildCurrentOt();
 const op = period_(fmt(today));
 const otView = sheets[CFG.OT_VIEW_PREFIX + op.key];
 ok(!!otView, 'สร้างชีท ' + CFG.OT_VIEW_PREFIX + op.key);
-const nDays = otView.g[1].length - 7;
+const nDays = otView.g[1].length - 6;
+ok(otView.g[1].indexOf('ชื่อในกลุ่มไลน์') < 0 && otView.fmt[[4, 1, 2, 1].join()] === '@', 'ชีทโอทีไม่มีคอลัมน์ชื่อในกลุ่มไลน์ และรหัสเป็นข้อความ');
 ok(otView.g[1][otView.g[1].length - 2] === 'รวม OT' && nDays >= 28 && nDays <= 31, 'ทั้งรอบอยู่ในตารางเดียว มีคอลัมน์รวม OT ต่อท้าย', nDays);
 const wantSum = otRows().filter(x => x[1] === 'KB028' && x[5] === 'อนุมัติ' && x[0] >= op.start && x[0] <= op.end).reduce((a, x) => a + x[3], 0);
 const kbRow = otView.g.slice(3).find(x => x && x[0] === 'KB028');

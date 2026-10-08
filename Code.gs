@@ -59,7 +59,7 @@ const LOG_COL = { ymd: 1, code: 2, label: 3, shift: 4, status: 5, reqId: 6, by: 
 const REQ_HEADERS = ['เลขคำขอ', 'เวลาส่ง', 'userId ผู้แจ้ง', 'ผู้แจ้ง', 'วันที่ทำงาน',
   'สรุป', 'รายการ (JSON)', 'คำเตือน (JSON)', 'สถานะ', 'ผู้พิจารณา', 'เวลาพิจารณา', 'เหตุผล/หมายเหตุ'];
 
-const VIEW_HEAD = ['รหัส', 'ชื่อ - สกุล', 'ชื่อในกลุ่มไลน์', 'แผนก', 'ชื่อเล่น'];
+const VIEW_HEAD = ['รหัส', 'ชื่อ - สกุล', 'แผนก', 'ชื่อเล่น'];   // คอลัมน์ข้อมูลคนในชีทรอบและชีทโอที (ตรึงไว้ทั้งหมด)
 
 const OT_HEADERS = ['วันที่', 'รหัส', 'ชื่อ', 'ชั่วโมง', 'ทำงานวันหยุด', 'สถานะ', 'เลขคำขอ', 'ผู้แจ้ง', 'ผู้พิจารณา', 'เวลาอัปเดต'];
 const OT_COL = { ymd: 1, code: 2, label: 3, hours: 4, holiday: 5, status: 6, reqId: 7, by: 8, approver: 9, at: 10 };
@@ -828,7 +828,7 @@ function buildPeriodSheet_(p) {
 
   // แถว 4 เป็นต้นไป
   const body = emps.map(e => {
-    const head = [e.code, e.name, e.lineName, e.dept, e.nick];
+    const head = viewHead_(e);
     const cells = dates.map(d => {
       const s = (state[d] || {})[e.code] || {};
       if (s.pending) return CFG.PENDING + s.pending.shift;
@@ -836,7 +836,10 @@ function buildPeriodSheet_(p) {
     });
     return head.concat(cells);
   });
-  if (body.length) sh.getRange(4, 1, body.length, nCol).setValues(body);
+  if (body.length) {
+    codeAsText_(sh, body.length);
+    sh.getRange(4, 1, body.length, nCol).setValues(body);
+  }
 
   // โน้ตเลขคำขอบนช่องที่ยังรออนุมัติ
   emps.forEach((e, r) => dates.forEach((d, c) => {
@@ -858,11 +861,17 @@ function buildPeriodSheet_(p) {
   }
 
   sh.setFrozenRows(3);
-  sh.setFrozenColumns(5);
+  sh.setFrozenColumns(VIEW_HEAD.length);
   sh.setColumnWidth(2, 180);
   SpreadsheetApp.flush();
   return sh.getName();
 }
+
+/** ข้อมูลคน 1 แถวของตารางแนวกว้าง เรียงตาม VIEW_HEAD */
+function viewHead_(e) { return [e.code, e.name, e.dept, e.nick]; }
+
+/** คอลัมน์รหัสต้องเป็นข้อความก่อนใส่ค่า ไม่งั้น Sheets จะแปลง 018 เป็นเลข 18 */
+function codeAsText_(sh, nRows) { sh.getRange(4, 1, nRows, 1).setNumberFormat('@'); }
 
 /** คืนชีทเปล่าพร้อมสร้างตารางแนวกว้างใหม่ทั้งใบ (ถ้ามีอยู่แล้วจะล้างทิ้ง) */
 function freshSheet_(name) {
@@ -1197,10 +1206,11 @@ function buildOtSheet_(p) {
       return s.ok ? s.ok.hours : '';
     });
     colors.push(bg);
-    return [e.code, e.name, e.lineName, e.dept, e.nick].concat(cells, [sum, holidays || '']);
+    return viewHead_(e).concat(cells, [sum, holidays || '']);
   });
 
   if (body.length) {
+    codeAsText_(sh, body.length);
     sh.getRange(4, 1, body.length, nCol).setValues(body);
     const area = sh.getRange(4, H + 1, body.length, dates.length);
     // สีวันหยุดมาจากข้อมูลในบันทึก สคริปต์ลงสีให้ใหม่ทุกครั้งที่สร้างชีท จึงไม่หายเหมือนสีที่ระบายมือ
@@ -1223,7 +1233,7 @@ function buildOtSheet_(p) {
   sh.getRange(noteRow + 2, 1).setBackground(OFF);
 
   sh.setFrozenRows(3);
-  sh.setFrozenColumns(5);
+  sh.setFrozenColumns(VIEW_HEAD.length);
   sh.setColumnWidth(2, 180);
   SpreadsheetApp.flush();
   return sh.getName();

@@ -78,6 +78,8 @@ function onOpen() {
     .addItem('สร้าง/รีเฟรชตารางโอทีรอบก่อนหน้า', 'buildPreviousOt')
     .addSeparator()
     .addItem('ตรวจการตั้งค่า', 'checkSetup')
+    .addItem('เปิดโหมดตอบเร็ว (ปลุกเซิร์ฟเวอร์ทุก 5 นาที)', 'installKeepWarm')
+    .addItem('ปิดโหมดตอบเร็ว', 'removeKeepWarm')
     .addItem('ย้ายข้อมูลจากชีทเดิม (ครั้งเดียว)', 'migrateFromLegacy')
     .addToUi();
 }
@@ -212,6 +214,26 @@ function doPost(e) {
     return ContentService.createTextOutput('OK');
   }
   return json_(handleApi_(body || {})); // มาจากหน้าฟอร์ม LIFF
+}
+
+/* ================= โหมดตอบเร็ว ================= */
+/*
+ * เว็บแอป Apps Script ที่ไม่มีคนเรียกสักพักจะ "หลับ" คำขอแรกหลังจากนั้นใช้เวลา 5-10 วินาที
+ * โหมดนี้ตั้ง trigger ให้เรียก /exec ของตัวเองทุก 5 นาที เพื่อให้คำขอจริงตอบใน 1-2 วินาที
+ * ใช้เวลารัน trigger ราว 10 นาทีต่อวัน (โควตาบัญชีฟรี 90 นาทีต่อวัน) ไม่ใช้โควตาข้อความ LINE
+ */
+function keepWarm() {
+  try { UrlFetchApp.fetch(ScriptApp.getService().getUrl(), { muteHttpExceptions: true }); } catch (e) { console.error(e); }
+}
+
+function installKeepWarm() {
+  removeKeepWarm();
+  ScriptApp.newTrigger('keepWarm').timeBased().everyMinutes(5).create();
+  console.log('เปิดโหมดตอบเร็วแล้ว');
+}
+
+function removeKeepWarm() {
+  ScriptApp.getProjectTriggers().forEach(t => { if (t.getHandlerFunction() === 'keepWarm') ScriptApp.deleteTrigger(t); });
 }
 
 /* ================= API สำหรับหน้าฟอร์ม ================= */
@@ -444,6 +466,8 @@ function handleLine_(events) {
       const isDirect = ev.source && ev.source.type === 'user';
 
       if (cmd === null && !isDirect) return;   // ข้อความอื่นในกลุ่ม บอทจะเงียบ
+      // ข้อความสรุปที่ฟอร์มส่งในนามผู้ใช้หลังบันทึก (liff.sendMessages ใน index.html) ไม่ใช่การเรียกบอท
+      if (cmd === null && /^(บันทึก|ขออนุมัติ)(ตาราง|โอที) /.test(raw)) return;
 
       const t = (cmd === null ? raw : cmd).trim();
       if (!t || t === 'เมนู' || t === 'แจ้งงาน' || t === 'โอที' || t === 'แจ้งโอที') reply_(ev.replyToken, [menuFlex_()]);

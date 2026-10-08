@@ -131,6 +131,9 @@ textarea{width:100%;border:1px solid var(--line);background:var(--paper);border-
   background:var(--ink);color:var(--paper);padding:9px 16px;border-radius:999px;font-size:14px;z-index:20;
   opacity:0;pointer-events:none;transition:opacity .2s;max-width:90vw;text-align:center}
 .toast.show{opacity:1}
+.sync{position:fixed;top:calc(6px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);z-index:20;
+  background:var(--amber-bg);color:var(--amber);border-radius:999px;padding:3px 12px;font-size:12px;white-space:nowrap}
+.sync[hidden]{display:none}
 .uid{font-family:ui-monospace,Menlo,monospace;font-size:12px;word-break:break-all;background:var(--card);border:1px solid var(--line);border-radius:var(--r-sm);padding:10px;margin:12px 0;text-align:left}
 </style>
 </head>
@@ -138,6 +141,7 @@ textarea{width:100%;border:1px solid var(--line);background:var(--paper);border-
 <main class="wrap" id="app"><div class="state">กำลังเปิดฟอร์ม…</div></main>
 <div id="overlay"></div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
+<div id="sync" class="sync" role="status" hidden>กำลังอัปเดตข้อมูลล่าสุด…</div>
 
 <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <script>
@@ -223,28 +227,67 @@ async function api(action, payload = {}){
   throw new Error(last);
 }
 
+/* Apps Script ตอนเพิ่งตื่นใช้เวลา 5-10 วินาทีกว่าจะตอบ จึงจำคำตอบของ init ครั้งล่าสุดไว้ในเครื่อง
+   เปิดครั้งถัดไปแสดงฟอร์มจากข้อมูลที่จำไว้ทันที แล้วค่อยแทนด้วยข้อมูลล่าสุดเมื่อเซิร์ฟเวอร์ตอบ
+   (ข้อมูลที่จำไว้ใช้แค่แสดงผล ฝั่งเซิร์ฟเวอร์ตรวจสิทธิ์และรายชื่อซ้ำทุกครั้งที่ส่ง) */
+const CACHE_KEY = 'kb-init-v1';
+function loadCache(uid){
+  try { const c = JSON.parse(localStorage.getItem(CACHE_KEY)); return c && c.uid === uid && c.d && c.d.user ? c.d : null; }
+  catch (e) { return null; }
+}
+function saveCache(uid, d){
+  try { d.user ? localStorage.setItem(CACHE_KEY, JSON.stringify({ uid, d })) : localStorage.removeItem(CACHE_KEY); } catch (e) {}
+}
+function setSync(on){ S.syncing = on; const el = $('#sync'); if (el) el.hidden = !on; }
+
 async function boot(){
+  const slow = setTimeout(() => { const el = $('#app .state'); if (el && !S.d) el.textContent = 'กำลังเปิดฟอร์ม… เซิร์ฟเวอร์กำลังเริ่มทำงาน อาจใช้เวลาราว 10 วินาที'; }, 4000);
   try {
     await liff.init({ liffId: CONFIG.LIFF_ID });
     if (!liff.isLoggedIn()) { liff.login({ redirectUri: location.href }); return; }
     if (!freshToken()) return;
-    const q = new URLSearchParams(location.search);
+    const uid = (liff.getDecodedIDToken() || {}).sub || '';
+    const cached = loadCache(uid);
+    if (cached) { start(cached); setSync(true); }
     const d = await api('init');
-    S.d = d;
-    if (!d.user) return noAccess(d.me);
-    S.date = d.defaultDate;
-    S.groups = [newGroup()];
-    (d.user.depts.length ? d.user.depts : [...new Set(d.employees.map(e => e.dept))]).forEach(x => S.openDept.add(x));
-    const page = q.get('page'), id = q.get('id');
-    // CEO ใช้ได้เฉพาะเรื่องโอที จึงเปิดมาที่โอทีเสมอ
-    if (d.user.role === 'CEO' || page === 'ot' || page === 'otapprove') S.kind = 'ot';
-    if (page === 'approve' || page === 'otapprove') {
-      const need = page === 'approve' ? 'HR' : 'CEO';
-      if (d.user.role === need) { S.page = 'approve'; S.pending = (isOt() ? d.otPending : d.pending) || []; if (id) { S.sel.add(id); S.expanded.add(id); } }
-      else toast('หน้ารายการรออนุมัติสำหรับ ' + need + ' เท่านั้น');
-    }
-    render(true);
-  } catch (e) { fail(e.message); }
+    saveCache(uid, d);
+    setSync(false);
+    if (cached) refresh(d); else start(d);
+  } catch (e) {
+    if (S.d) toast('อัปเดตข้อมูลล่าสุดไม่สำเร็จ: ' + e.message); else fail(e.message);
+  } finally { clearTimeout(slow); setSync(false); }
+}
+
+/* แสดงฟอร์มครั้งแรก จากข้อมูลที่จำไว้หรือจากเซิร์ฟเวอร์ */
+function start(d){
+  S.d = d;
+  if (!d.user) return noAccess(d.me);
+  const q = new URLSearchParams(location.search);
+  S.date = d.defaultDate;
+  S.groups = [newGroup()];
+  (d.user.depts.length ? d.user.depts : [...new Set(d.employees.map(e => e.dept))]).forEach(x => S.openDept.add(x));
+  const page = q.get('page'), id = q.get('id');
+  // CEO ใช้ได้เฉพาะเรื่องโอที จึงเปิดมาที่โอทีเสมอ
+  if (d.user.role === 'CEO' || page === 'ot' || page === 'otapprove') S.kind = 'ot';
+  if (page === 'approve' || page === 'otapprove') {
+    const need = page === 'approve' ? 'HR' : 'CEO';
+    if (d.user.role === need) { S.page = 'approve'; S.pending = (isOt() ? d.otPending : d.pending) || []; if (id) { S.sel.add(id); S.expanded.add(id); } }
+    else toast('หน้ารายการรออนุมัติสำหรับ ' + need + ' เท่านั้น');
+  }
+  render(true);
+}
+
+/* ข้อมูลล่าสุดมาถึงหลังจากแสดงฟอร์มจากข้อมูลที่จำไว้แล้ว: แทนข้อมูลโดยไม่ล้างสิ่งที่ผู้ใช้เลือกไปแล้ว */
+function refresh(d){
+  const old = S.d;
+  // สิทธิ์เปลี่ยน (ถูกถอดสิทธิ์ หรือเปลี่ยนบทบาท) เริ่มใหม่จากข้อมูลล่าสุดที่เพิ่งจำไว้
+  if (!d.user || d.user.role !== old.user.role) { location.reload(); return; }
+  S.d = d;
+  if (S.page === 'done') return;
+  // ถ้ายังไม่ได้เลือกวันเอง หรือวันที่เลือกไว้หลุดช่วงไปแล้ว ให้ใช้วันเริ่มต้นของวันนี้
+  if (S.date === old.defaultDate || !d.dates.some(x => x.ymd === S.date)) S.date = d.defaultDate;
+  if (S.page === 'approve') S.pending = (isOt() ? d.otPending : d.pending) || [];
+  render();
 }
 
 function fail(msg){
@@ -468,10 +511,10 @@ function renderApprove(){
   }).join('');
 
   $('#app').innerHTML = `
-    <div class="top"><div><h1>${isOt() ? 'โอทีรออนุมัติ' : 'รออนุมัติ'}</h1><p class="sub">${list.length ? list.length + ' คำขอ' : 'ไม่มีคำขอค้าง'}</p></div>
+    <div class="top"><div><h1>${isOt() ? 'โอทีรออนุมัติ' : 'รออนุมัติ'}</h1><p class="sub">${list.length ? list.length + ' คำขอ' : (S.syncing ? 'กำลังโหลดรายการล่าสุด…' : 'ไม่มีคำขอค้าง')}</p></div>
       <button class="linkbtn" data-act="goform">${isOt() ? 'แจ้งโอที' : 'แจ้งวันทำงาน'}</button></div>
     ${isOt() ? '' : warnNo}
-    ${list.length ? cards : `<div class="state"><p>ไม่มีคำขอที่รออนุมัติ เมื่อหัวหน้างานส่งคำขอ บอทจะแจ้งคุณในแชท</p></div>`}`;
+    ${list.length ? cards : `<div class="state"><p>${S.syncing ? 'กำลังโหลดรายการล่าสุด…' : 'ไม่มีคำขอที่รออนุมัติ เมื่อหัวหน้างานส่งคำขอ บอทจะแจ้งคุณในแชท'}</p></div>`}`;
   const n = [...S.sel].filter(id => list.some(r => r.id === id)).length;
   bottom(list.length ? `<div class="info"><b>เลือก ${n} คำขอ</b>ตารางจะอัปเดตทันทีที่อนุมัติ</div>
     <button class="primary" data-act="approve" ${n && !S.busy ? '' : 'disabled'}>${S.busy ? 'กำลังบันทึก…' : 'อนุมัติที่เลือก'}</button>` : '');

@@ -1,8 +1,9 @@
 /**
  * ทดสอบ Code.gs ด้วย Node โดยจำลอง SpreadsheetApp / UrlFetchApp / LINE
  *   node tests/mock-test.js
- * ลำดับที่ทดสอบ: ย้ายข้อมูลจากชีทเดิม -> init -> submit -> approve (แก้เวลา)
- *                -> submit -> reject -> ตรวจสิทธิ์ -> สร้างตารางรอบ
+ * ลำดับที่ทดสอบ: ย้ายข้อมูลจากชีทเดิม -> init -> แจ้งวันทำงาน (ลงทันที ไม่ต้องขออนุมัติ)
+ *                -> เคลียร์คำขอเวรที่ค้างจากระบบเดิม -> ตรวจสิทธิ์ -> สร้างตารางรอบ
+ *                -> โอที (แจ้งล่วงหน้า -> CEO อนุมัติ/ไม่อนุมัติ -> แจ้งย้อนหลัง -> ตารางโอที)
  */
 const fs = require('fs');
 const path = require('path');
@@ -32,7 +33,7 @@ Sheet.prototype.getRange = function (r, c, nr, nc) {
     breakApart() { s.merges = s.merges.filter(m => m.c < c || m.c + m.nc - 1 > c + nc - 1); return this; }
   };
   ['setFontWeight', 'setNumberFormat', 'setDataValidation', 'setHorizontalAlignment',
-   'setBackground', 'setFontColor', 'setFontSize'].forEach(m => (api[m] = () => api));
+   'setBackground', 'setBackgrounds', 'setFontColor', 'setFontSize'].forEach(m => (api[m] = () => api));
   return api;
 };
 Sheet.prototype.getDataRange = function () { return this.getRange(1, 1, Math.max(this.g.length, 1), Math.max(this.getLastColumn(), 1)); };
@@ -95,21 +96,21 @@ const D = n => fmt(dayOf(n));
 // แถว 2 มีวันที่ 2 บล็อกคั่นด้วยช่องว่าง เพื่อทดสอบว่า migrate ข้ามช่องว่างได้
 const legacy = [
   ['รายชื่อพนักงาน'],
-  ['รหัส', 'ชื่อ - สกุล', 'ชื่อในกลุ่มไลน์', 'แผนก', 'ชื่อเล่น', '30,000.00', 'เดือน', dayOf(-2), dayOf(-1), '', dayOf(30)],
+  ['รหัส', 'ชื่อ - สกุล', 'ชื่อในกลุ่มไลน์', 'แผนก', 'ชื่อเล่น', dayOf(-2), dayOf(-1), '', dayOf(30)],
   [],
-  ['KB028', 'น.ส.ฐิติมา  นิลสีอ่อน', '', 'ทีมปลูก', 'ทราย', '13,000', 'เดือน', '8.00-17.00', 'หยุด', '', '8.00-17.00'],
-  ['013', 'น.ส.บังออล ปานยิ้ม', '', 'ทีมปลูก', 'น้าน้อง', '15,000', 'เดือน', '8.00-17.00'],
+  ['KB028', 'น.ส.ฐิติมา  นิลสีอ่อน', '', 'ทีมปลูก', 'ทราย', '8.00-17.00', 'หยุด', '', '8.00-17.00'],
+  ['013', 'น.ส.บังออล ปานยิ้ม', '', 'ทีมปลูก', 'น้าน้อง', '8.00-17.00'],
   ['', 'น.ส.น้ำค้าง ศรี', '', 'ห้องทริม', ''],
   ['หมายเหตุ']
 ];
 addSheet('รหัสพนักงาน', legacy);
-addSheet('ผู้ใช้ระบบ', [['h'], ['U1', 'หัวหน้า', 'หัวหน้างาน', ''], ['UHR', 'พี่HR', 'HR', '']]);
+addSheet('ผู้ใช้ระบบ', [['h'], ['U1', 'หัวหน้า', 'หัวหน้างาน', ''], ['UHR', 'พี่HR', 'HR', ''], ['UCEO', 'บอส', 'CEO', '']]);
 
 /* ---------- โหลด Code.gs ---------- */
 eval(fs.readFileSync(path.join(__dirname, '..', 'Code.gs'), 'utf8') +
   ';global.handleApi_=handleApi_;global.checkSetup=checkSetup;global.handleLine_=handleLine_;' +
   'global.migrateFromLegacy=migrateFromLegacy;global.buildCurrentPeriod=buildCurrentPeriod;' +
-  'global.period_=period_;global.scheduleText_=scheduleText_;global.CFG=CFG;');
+  'global.period_=period_;global.scheduleText_=scheduleText_;global.CFG=CFG;global.buildCurrentOt=buildCurrentOt;');
 
 /* ---------- ทดสอบ ---------- */
 let fails = 0;
@@ -136,104 +137,177 @@ ok(logRows().length === before, 'รันย้ำแล้วไม่เพ�
 console.log('\n=== ตรวจการตั้งค่า ===');
 console.log(checkSetup());
 
-console.log('\n=== หัวหน้างานส่งคำขอ ===');
+console.log('\n=== หัวหน้างานแจ้งวันทำงาน (ไม่ต้องขออนุมัติ) ===');
 let r = handleApi_({ action: 'init', idToken: 'x' });
 ok(r.ok && r.employees.length === 2, 'init คืนพนักงาน 2 คน', r.employees && r.employees.length);
 ok(r.dates.some(d => d.ymd === D(1)), 'ช่วงวันที่มีพรุ่งนี้');
 ok(r.dates.some(d => d.ymd === D(-14)) && !r.dates.some(d => d.ymd === D(-15)), 'แจ้งย้อนหลังได้ 14 วัน');
 ok(r.defaultDate === D(1), 'ค่าเริ่มต้นคือพรุ่งนี้', r.defaultDate);
 
+let nPush = pushed.length;
 r = handleApi_({ action: 'submit', idToken: 'x', date: D(1),
   groups: [{ shift: '21:00-05:00', codes: ['KB028'] }, { shift: '19.00-03.00', codes: ['013'] }] });
-ok(r.ok && r.id === 'R0001', 'ส่งคำขอสำเร็จ', r);
-ok(cellOf(D(1), 'KB028', 'รออนุมัติ') === '21.00-05.00', 'เวลาถูกจัดรูปแบบเป็น 21.00-05.00');
-ok(scheduleText_(1).includes('(รอ) 21.00-05.00'), 'ดูตารางพรุ่งนี้เห็นสถานะรออนุมัติ');
+ok(r.ok && !r.id && r.saved && r.saved.id === 'R0001', 'แจ้งล่วงหน้า ลงตารางทันที ไม่มีคำขอรออนุมัติ', r);
+ok(cellOf(D(1), 'KB028', 'อนุมัติ') === '21.00-05.00' && cellOf(D(1), 'KB028', 'รออนุมัติ') === null, 'เวลาถูกจัดรูปแบบเป็น 21.00-05.00 และเป็นอนุมัติเลย');
+ok(logRows().some(x => x[5] === 'R0001' && x[6] === 'หัวหน้า' && x[7] === CFG.AUTO_BY), 'บันทึกชื่อผู้แจ้ง ผู้พิจารณาระบุว่าอัตโนมัติ');
+ok(scheduleText_(1).includes('21.00-05.00') && !scheduleText_(1).includes('(รอ)'), 'ดูตารางพรุ่งนี้เห็นค่าทันที ไม่มี (รอ)');
 
-console.log('\n=== HR อนุมัติพร้อมแก้เวลา ===');
-who = 'UHR';
-r = handleApi_({ action: 'init', idToken: 'x' });
-ok(r.pending && r.pending.length === 1, 'HR เห็นคำขอค้าง 1 รายการ', r.pending && r.pending.length);
-r = handleApi_({ action: 'approve', idToken: 'x', id: 'R0001', edits: { '013': 'หยุด' } });
-ok(r.ok && !r.skipped.length, 'อนุมัติสำเร็จ', r);
-ok(cellOf(D(1), '013', 'อนุมัติ') === 'หยุด', 'HR แก้เวลาของ น้าน้อง เป็น หยุด');
-ok(scheduleText_(1).includes('21.00-05.00') && !scheduleText_(1).includes('(รอ)'), 'ตารางพรุ่งนี้เป็นค่าอนุมัติแล้ว');
-
-console.log('\n=== แทนที่เวรเดิมของวันเดียวกัน ===');
-who = 'U1';
+console.log('\n=== แก้เวรเดิมของวันเดียวกัน ===');
 r = handleApi_({ action: 'submit', idToken: 'x', date: D(1), groups: [{ shift: '8.00-17.00', codes: ['KB028'] }] });
-ok(r.id === 'R0002' && r.warnings.length === 0, 'ไม่มีคำขออื่นค้างอยู่');
-who = 'UHR';
-handleApi_({ action: 'approve', idToken: 'x', id: 'R0002' });
-ok(cellOf(D(1), 'KB028', 'อนุมัติ') === '8.00-17.00', 'ค่าใหม่ทับค่าเดิม');
-ok(logRows().filter(x => x[1] === 'KB028' && x[4] === 'แทนที่').length === 1, 'แถวเดิมถูกทำเครื่องหมายว่าแทนที่');
-
-console.log('\n=== ไม่อนุมัติ ===');
-who = 'U1';
-r = handleApi_({ action: 'submit', idToken: 'x', date: D(2), groups: [{ shift: '10.00-18.00', codes: ['KB028'] }] });
-who = 'UHR';
-r = handleApi_({ action: 'reject', idToken: 'x', id: 'R0003', reason: 'ยังไม่ยืนยัน' });
-ok(r.ok, 'ไม่อนุมัติสำเร็จ', r);
-ok(cellOf(D(2), 'KB028', 'อนุมัติ') === null, 'ไม่มีเวรที่อนุมัติในวันนั้น');
-ok(cellOf(D(2), 'KB028', 'ไม่อนุมัติ') === '10.00-18.00', 'แถวเดิมเปลี่ยนเป็นไม่อนุมัติ ไม่ต้องคืนค่า');
-
-console.log('\n=== ตรวจสิทธิ์ ===');
-who = 'U1';
-ok(handleApi_({ action: 'approve', idToken: 'x', id: 'R0003' }).error === 'เมนูนี้สำหรับ HR เท่านั้น', 'หัวหน้างานอนุมัติไม่ได้');
-who = 'UX';
-ok(handleApi_({ action: 'submit', idToken: 'x', date: D(1), groups: [] }).error === 'บัญชีนี้ยังไม่มีสิทธิ์ใช้งาน', 'คนนอกใช้งานไม่ได้');
+ok(r.saved && !r.id && cellOf(D(1), 'KB028', 'อนุมัติ') === '8.00-17.00', 'ค่าใหม่ทับค่าเดิมทันที', r);
+ok(logRows().filter(x => x[0] === D(1) && x[1] === 'KB028' && x[4] === 'อนุมัติ').length === 1 &&
+   logRows().filter(x => x[0] === D(1) && x[1] === 'KB028' && x[4] === 'แทนที่').length === 1, 'แถวเดิมเป็นแทนที่ เหลืออนุมัติแถวเดียว');
+ok(cellOf(D(1), '013', 'อนุมัติ') === '19.00-03.00', 'คนอื่นในวันเดียวกันไม่ถูกกระทบ');
 
 console.log('\n=== แจ้งย้อนหลัง ===');
-who = 'U1';
-let nPush = pushed.length;
 r = handleApi_({ action: 'submit', idToken: 'x', date: D(-5), groups: [{ shift: '9.00-18.00', codes: ['KB028', '013'] }] });
-ok(r.ok && r.saved && !r.id && r.saved.groups[0].names.length === 2, 'วันย้อนหลังที่ยังว่าง ลงตารางทันที ไม่มีคำขอรออนุมัติ', r);
-ok(cellOf(D(-5), 'KB028', 'อนุมัติ') === '9.00-18.00' && cellOf(D(-5), 'KB028', 'รออนุมัติ') === null, 'แถวในบันทึกเวรเป็นอนุมัติเลย');
-ok(logRows().some(x => x[5] === r.saved.id && x[7] === CFG.AUTO_BY), 'ช่องผู้พิจารณาระบุว่าอัตโนมัติ');
-ok(pushed.length === nPush, 'ไม่ push หา HR เมื่อไม่มีอะไรต้องอนุมัติ');
+ok(r.ok && r.saved && !r.id && r.saved.groups[0].names.length === 2, 'วันย้อนหลัง ลงตารางทันที', r);
 r = handleApi_({ action: 'submit', idToken: 'x', date: D(-5), groups: [{ shift: 'หยุด', codes: ['KB028'] }] });
-ok(r.ok && r.id && !r.saved, 'แก้เวรย้อนหลังที่อนุมัติแล้ว ต้องรอ HR', r);
-ok(cellOf(D(-5), 'KB028', 'อนุมัติ') === '9.00-18.00' && cellOf(D(-5), 'KB028', 'รออนุมัติ') === 'หยุด', 'ค่าเดิมยังอยู่จนกว่า HR จะอนุมัติ');
-ok(pushed.length === nPush + 1, 'push หา HR เฉพาะส่วนที่ต้องอนุมัติ');
-r = handleApi_({ action: 'submit', idToken: 'x', date: D(-6), groups: [{ shift: '8.00-17.00', codes: ['013'] }] });
-r = handleApi_({ action: 'submit', idToken: 'x', date: D(-6), groups: [{ shift: '10.00-18.00', codes: ['KB028', '013'] }] });
-ok(r.saved && r.id && r.saved.id !== r.id && r.saved.groups[0].names.length === 1 && r.groups[0].names.length === 1, 'คำขอผสม แยกเป็น 2 ใบ', r);
+ok(r.saved && !r.id && cellOf(D(-5), 'KB028', 'อนุมัติ') === 'หยุด', 'แก้เวรย้อนหลังที่ลงไว้แล้ว ก็ไม่ต้องรอใคร', r);
 r = handleApi_({ action: 'submit', idToken: 'x', date: D(0), groups: [{ shift: '8.00-17.00', codes: ['013'] }] });
-ok(r.id && !r.saved, 'วันนี้ไม่นับเป็นย้อนหลัง ต้องรอ HR', r);
+ok(r.saved && !r.id, 'วันนี้ก็ลงทันที', r);
 ok(!!handleApi_({ action: 'submit', idToken: 'x', date: D(-15), groups: [{ shift: '8.00-17.00', codes: ['013'] }] }).error, 'ย้อนหลังเกิน 14 วันแจ้งไม่ได้');
+ok(pushed.length === nPush, 'แจ้งวันทำงานไม่ push หาใครเลย');
 
 console.log('\n=== HR แจ้งเอง ===');
 who = 'UHR';
-nPush = pushed.length;
 r = handleApi_({ action: 'submit', idToken: 'x', date: D(3), groups: [{ shift: '9.00-18.00', codes: ['KB028'] }] });
 ok(r.ok && r.saved && !r.id, 'HR แจ้งล่วงหน้า ลงตารางทันที', r);
 ok(cellOf(D(3), 'KB028', 'อนุมัติ') === '9.00-18.00' && logRows().some(x => x[5] === r.saved.id && x[7] === 'พี่HR'), 'ผู้พิจารณาคือ HR คนที่แจ้ง');
-r = handleApi_({ action: 'submit', idToken: 'x', date: D(3), groups: [{ shift: 'หยุด', codes: ['KB028'] }] });
-ok(r.saved && !r.id && cellOf(D(3), 'KB028', 'อนุมัติ') === 'หยุด', 'HR แก้เวรที่อนุมัติแล้ว ทับได้เลย', r);
-ok(logRows().filter(x => x[0] === D(3) && x[1] === 'KB028' && x[4] === 'อนุมัติ').length === 1 &&
-   logRows().filter(x => x[0] === D(3) && x[1] === 'KB028' && x[4] === 'แทนที่').length === 1, 'เวรเดิมถูกทำเครื่องหมายว่าแทนที่ เหลืออนุมัติแถวเดียว');
-ok(pushed.length === nPush, 'HR แจ้งเอง ไม่มีการ push');
+
+console.log('\n=== คำขอเวรที่ค้างจากระบบเดิม ===');
+// จำลองคำขอที่ส่งไว้ก่อนยกเลิกขั้นตอนอนุมัติ ซึ่งยังต้องเคลียร์ได้
+const legacyReq = (id, ymd, code, label, shift) => {
+  sheets['บันทึกเวร'].g.push([ymd, code, label, shift, 'รออนุมัติ', id, 'หัวหน้า', '', new Date()]);
+  sheets['คำขอ'].g.push([id, new Date(), 'U1', 'หัวหน้า', ymd, shift + ': ' + label,
+    JSON.stringify([{ code: code, label: label, shift: shift }]), '[]', 'รออนุมัติ', '', '', '']);
+};
+legacyReq('R0901', D(4), '013', 'น้าน้อง', '10.00-18.00');
+legacyReq('R0902', D(5), 'KB028', 'ทราย', '10.00-18.00');
+legacyReq('R0903', D(6), '013', 'น้าน้อง', '10.00-18.00');
+r = handleApi_({ action: 'init', idToken: 'x' });
+ok(r.pending && r.pending.length === 3, 'HR ยังเห็นคำขอที่ค้างอยู่', r.pending && r.pending.length);
+ok(scheduleText_(4).includes('(รอ) 10.00-18.00'), 'ตารางยังแสดง (รอ) ของคำขอที่ค้าง');
+r = handleApi_({ action: 'approve', idToken: 'x', id: 'R0901', edits: { '013': 'หยุด' } });
+ok(r.ok && !r.skipped.length && cellOf(D(4), '013', 'อนุมัติ') === 'หยุด', 'HR อนุมัติพร้อมแก้เวลาได้', r);
+r = handleApi_({ action: 'reject', idToken: 'x', id: 'R0902', reason: 'ยังไม่ยืนยัน' });
+ok(r.ok && cellOf(D(5), 'KB028', 'อนุมัติ') === null && cellOf(D(5), 'KB028', 'ไม่อนุมัติ') === '10.00-18.00', 'ไม่อนุมัติได้ แถวเปลี่ยนเป็นไม่อนุมัติ ไม่ต้องคืนค่า', r);
+who = 'U1';
+r = handleApi_({ action: 'submit', idToken: 'x', date: D(6), groups: [{ shift: '8.00-17.00', codes: ['013'] }] });
+who = 'UHR';
+ok(cellOf(D(6), '013', 'อนุมัติ') === '8.00-17.00' && cellOf(D(6), '013', 'รออนุมัติ') === null &&
+   handleApi_({ action: 'pending', idToken: 'x' }).pending.length === 0, 'แจ้งใหม่ทับคำขอที่ค้าง คำขอค้างถูกปิดเป็นแทนที่');
+
+console.log('\n=== ตรวจสิทธิ์ ===');
+who = 'U1';
+ok(handleApi_({ action: 'approve', idToken: 'x', id: 'R0902' }).error === 'เมนูนี้สำหรับ HR เท่านั้น', 'หัวหน้างานอนุมัติไม่ได้');
+who = 'UCEO';
+ok(!!handleApi_({ action: 'submit', idToken: 'x', date: D(1), groups: [{ shift: '8.00-17.00', codes: ['013'] }] }).error, 'CEO แจ้งวันทำงานไม่ได้ (ใช้ได้เฉพาะโอที)');
+who = 'UX';
+ok(handleApi_({ action: 'submit', idToken: 'x', date: D(1), groups: [] }).error === 'บัญชีนี้ยังไม่มีสิทธิ์ใช้งาน', 'คนนอกใช้งานไม่ได้');
 
 console.log('\n=== พนักงานลาออก ===');
 who = 'U1';
-sheets['พนักงาน'].g[1][8] = D(-1); // KB028 ออกเมื่อวาน
+sheets['พนักงาน'].g[1][6] = D(-1); // KB028 ออกเมื่อวาน
 r = handleApi_({ action: 'init', idToken: 'x' });
 ok(r.employees.length === 1 && r.employees[0].code === '013', 'คนลาออกไม่ขึ้นในฟอร์ม', r.employees.map(e => e.code));
 ok(logRows().some(x => x[1] === 'KB028'), 'ประวัติของคนลาออกยังอยู่ครบ');
-sheets['พนักงาน'].g[1][8] = '';
+sheets['พนักงาน'].g[1][6] = '';
 
 console.log('\n=== สร้างตารางรอบ ===');
 buildCurrentPeriod();
 const p = period_(fmt(today));
 const view = sheets[CFG.VIEW_PREFIX + p.key];
 ok(!!view, 'สร้างชีท ' + CFG.VIEW_PREFIX + p.key);
-ok(view.g[1].length === 7 + 31 || view.g[1].length === 7 + 30 || view.g[1].length === 7 + 29,
-  'หัวตารางมีคอลัมน์วันครบทั้งรอบ', view.g[1].length - 7);
+ok(view.g[1].length === 5 + 31 || view.g[1].length === 5 + 30 || view.g[1].length === 5 + 29,
+  'หัวตารางมีคอลัมน์วันครบทั้งรอบ', view.g[1].length - 5);
+ok(view.g[1].indexOf('ค่าแรง') < 0 && sheets['พนักงาน'].g[0].indexOf('ค่าแรง') < 0, 'ไม่มีคอลัมน์ค่าแรงในชีทรอบและชีทพนักงาน');
 ok(view.g.slice(3).some(row => row && row.indexOf('8.00-17.00') >= 0), 'ตารางดึงค่าจากบันทึกเวรมาแสดง');
 buildCurrentPeriod();
 ok(sheets[CFG.VIEW_PREFIX + p.key].g.slice(3).filter(x => x && x[0]).length === 2, 'สร้างซ้ำแล้วไม่มีแถวค้าง');
 
+console.log('\n=== โอที: หัวหน้างานแจ้งล่วงหน้า รอ CEO ===');
+const otRows = () => sheets['บันทึกโอที'].g.slice(1).filter(x => x && x[1]);
+const otOf = (ymd, code, status) => otRows().filter(x => x[0] === ymd && x[1] === code && (!status || x[5] === status)).pop() || null;
+who = 'U1';
+nPush = pushed.length;
+r = handleApi_({ action: 'otSubmit', idToken: 'x', date: D(1),
+  groups: [{ hours: 3, codes: ['KB028'] }, { hours: 2.5, holiday: true, codes: ['013'] }] });
+ok(r.ok && r.id === 'T0001' && !r.saved, 'ส่งคำขอโอทีสำเร็จ เลขคำขอขึ้นต้นด้วย T', r);
+ok(otOf(D(1), 'KB028', 'รออนุมัติ')[3] === 3 && otOf(D(1), '013', 'รออนุมัติ')[4] === 'ใช่', 'บันทึกโอทีเป็นรออนุมัติ พร้อมเครื่องหมายทำงานวันหยุด');
+ok(pushed.length === nPush + 1 && pushed[pushed.length - 1].to === 'UCEO', 'push หา CEO ไม่ใช่ HR', pushed[pushed.length - 1].to);
+ok(handleApi_({ action: 'otApprove', idToken: 'x', id: 'T0001' }).error === 'เมนูนี้สำหรับ CEO เท่านั้น', 'หัวหน้างานอนุมัติโอทีไม่ได้');
+who = 'UHR';
+ok(handleApi_({ action: 'otApprove', idToken: 'x', id: 'T0001' }).error === 'เมนูนี้สำหรับ CEO เท่านั้น', 'HR อนุมัติโอทีไม่ได้');
+ok(!!handleApi_({ action: 'otSubmit', idToken: 'x', date: D(1), groups: [{ hours: 2.3, codes: ['KB028'] }] }).error, 'ชั่วโมงที่ไม่ลงครึ่งชั่วโมง แจ้งไม่ได้');
+ok(!!handleApi_({ action: 'otSubmit', idToken: 'x', date: D(1), groups: [{ hours: 0, codes: ['KB028'] }] }).error, '0 ชั่วโมงและไม่ใช่วันหยุด แจ้งไม่ได้');
+
+console.log('\n=== โอที: CEO อนุมัติพร้อมแก้ชั่วโมง ===');
+who = 'UCEO';
+r = handleApi_({ action: 'init', idToken: 'x' });
+ok(r.otPending && r.otPending.length === 1 && r.otPending[0].entries.length === 2, 'CEO เห็นคำขอโอทีค้าง 1 ใบ', r.otPending && r.otPending.length);
+nPush = pushed.length;
+r = handleApi_({ action: 'otApprove', idToken: 'x', id: 'T0001', edits: { KB028: '4' } });
+ok(r.ok && !r.skipped.length, 'อนุมัติโอทีสำเร็จ', r);
+ok(otOf(D(1), 'KB028', 'อนุมัติ')[3] === 4 && otOf(D(1), 'KB028', 'อนุมัติ')[8] === 'บอส', 'CEO แก้ชั่วโมงเป็น 4 และเป็นผู้พิจารณา');
+ok(pushed.length === nPush + 1 && pushed[pushed.length - 1].to === 'U1', 'แจ้งผลกลับผู้แจ้ง');
+ok(!!handleApi_({ action: 'otApprove', idToken: 'x', id: 'T0001' }).error, 'อนุมัติซ้ำไม่ได้');
+
+console.log('\n=== โอที: แจ้งย้อนหลัง ถือว่าอนุมัติแล้ว ===');
+who = 'U1';
+nPush = pushed.length;
+r = handleApi_({ action: 'otSubmit', idToken: 'x', date: D(-3), groups: [{ hours: 5, codes: ['KB028', '013'] }] });
+ok(r.ok && r.saved && !r.id, 'วันย้อนหลัง บันทึกทันที ไม่มีคำขอรออนุมัติ', r);
+ok(otOf(D(-3), 'KB028', 'อนุมัติ')[3] === 5 && otOf(D(-3), 'KB028', 'อนุมัติ')[8] === CFG.AUTO_BY, 'ผู้พิจารณาระบุว่าอัตโนมัติ');
+ok(pushed.length === nPush, 'แจ้งย้อนหลังครั้งแรกไม่ push หาใคร');
+r = handleApi_({ action: 'otSubmit', idToken: 'x', date: D(-3), groups: [{ hours: 6, codes: ['KB028'] }] });
+ok(r.id && !r.saved && otOf(D(-3), 'KB028', 'อนุมัติ')[3] === 5, 'แก้โอทีที่อนุมัติแล้ว ต้องรอ CEO ค่าเดิมยังอยู่', r);
+ok(r.warnings.length === 1 && r.warnings[0].includes('อนุมัติไว้แล้ว 5 ชม.') && r.warnings[0].includes('หัวหน้า ขอแก้เป็น 6 ชม.'), 'คำเตือนบอกค่าเดิม ค่าใหม่ และชื่อคนแก้', r.warnings);
+const card = pushed[pushed.length - 1];
+ok(pushed.length === nPush + 1 && card.to === 'UCEO' && JSON.stringify(card.messages).includes('ขอแก้โอทีที่อนุมัติแล้ว') &&
+   JSON.stringify(card.messages).includes('หัวหน้า ขอแก้เป็น 6 ชม.'), 'แจ้งเตือน CEO พร้อมรายละเอียดการแก้');
+who = 'UCEO';
+ok(handleApi_({ action: 'otPending', idToken: 'x' }).pending.some(x => x.id === r.id && x.warnings.length === 1 && x.entries[0].old === '5 ชม.'), 'หน้าอนุมัติของ CEO เห็นค่าเดิมและคำเตือน');
+handleApi_({ action: 'otApprove', idToken: 'x', id: r.id });
+ok(otOf(D(-3), 'KB028', 'อนุมัติ')[3] === 6 &&
+   otRows().filter(x => x[0] === D(-3) && x[1] === 'KB028' && x[5] === 'แทนที่').length === 1, 'CEO อนุมัติแล้วค่าใหม่จึงแทนที่ค่าเดิม');
+who = 'U1';
+handleApi_({ action: 'otSubmit', idToken: 'x', date: D(-4), groups: [{ hours: 2, codes: ['013'] }] });
+r = handleApi_({ action: 'otSubmit', idToken: 'x', date: D(-4), groups: [{ hours: 3, codes: ['KB028', '013'] }] });
+ok(r.saved && r.id && r.saved.groups[0].names.join() === 'ทราย' && r.groups[0].names.join() === 'น้าน้อง', 'คำขอผสม: คนใหม่ลงทันที คนที่แก้ของเดิมรอ CEO', r);
+r = handleApi_({ action: 'otSubmit', idToken: 'x', date: D(0), groups: [{ hours: 2, codes: ['013'] }] });
+ok(r.id && !r.saved, 'วันนี้ไม่นับเป็นย้อนหลัง ต้องรอ CEO', r);
+const todayReq = r.id;
+
+console.log('\n=== โอที: ไม่อนุมัติ และ CEO แจ้งเอง ===');
+who = 'UCEO';
+r = handleApi_({ action: 'otReject', idToken: 'x', id: todayReq, reason: 'ไม่จำเป็น' });
+ok(r.ok && otOf(D(0), '013', 'ไม่อนุมัติ') && !otOf(D(0), '013', 'อนุมัติ'), 'ไม่อนุมัติสำเร็จ ไม่มีโอทีในวันนั้น', r);
+who = 'U1';
+r = handleApi_({ action: 'otSubmit', idToken: 'x', date: D(2), groups: [{ hours: 2, codes: ['KB028'] }] });
+const waitReq = r.id;
+who = 'UCEO';
+nPush = pushed.length;
+r = handleApi_({ action: 'otSubmit', idToken: 'x', date: D(2), groups: [{ hours: 3, codes: ['KB028'] }] });
+ok(r.saved && !r.id && otOf(D(2), 'KB028', 'อนุมัติ')[3] === 3 && pushed.length === nPush, 'CEO แจ้งเอง ลงทันที ไม่ push', r);
+ok(!otOf(D(2), 'KB028', 'รออนุมัติ') && handleApi_({ action: 'otPending', idToken: 'x' }).pending.every(x => x.id !== waitReq),
+  'คำขอที่ค้างของคน-วันเดียวกันถูกปิดเป็นแทนที่');
+
+console.log('\n=== สร้างตารางโอทีรอบ ===');
+buildCurrentOt();
+const op = period_(fmt(today));
+const otView = sheets[CFG.OT_VIEW_PREFIX + op.key];
+ok(!!otView, 'สร้างชีท ' + CFG.OT_VIEW_PREFIX + op.key);
+const nDays = otView.g[1].length - 7;
+ok(otView.g[1][otView.g[1].length - 2] === 'รวม OT' && nDays >= 28 && nDays <= 31, 'ทั้งรอบอยู่ในตารางเดียว มีคอลัมน์รวม OT ต่อท้าย', nDays);
+const wantSum = otRows().filter(x => x[1] === 'KB028' && x[5] === 'อนุมัติ' && x[0] >= op.start && x[0] <= op.end).reduce((a, x) => a + x[3], 0);
+const kbRow = otView.g.slice(3).find(x => x && x[0] === 'KB028');
+ok(kbRow && kbRow[kbRow.length - 2] === wantSum && wantSum > 0, 'รวม OT นับเฉพาะรายการที่อนุมัติแล้ว', wantSum);
+buildCurrentOt();
+ok(sheets[CFG.OT_VIEW_PREFIX + op.key].g.slice(3).filter(x => x && /^(KB028|013)$/.test(x[0])).length === 2, 'สร้างซ้ำแล้วไม่มีแถวค้าง');
+
 console.log('\n=== การแจ้งเตือน LINE ===');
-ok(pushed.length >= 3, 'มีการ push หา HR และผู้แจ้ง', pushed.length);
+ok(pushed.length >= 3, 'มีการ push หา CEO และผู้แจ้ง', pushed.length);
 ok(pushed.every(m => m.to && m.to[0] === 'U'), 'push เฉพาะแชทส่วนตัว ไม่ push เข้ากลุ่ม');
 
 console.log('\n=== เรียกบอทในกลุ่มด้วยชื่อ ===');

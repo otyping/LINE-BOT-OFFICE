@@ -1,11 +1,12 @@
 /**
- * ระบบแจ้งตารางทำงานผ่าน LINE + อนุมัติโดย HR
+ * ระบบแจ้งตารางทำงานและโอทีผ่าน LINE (วันทำงานลงตารางทันที โอทีอนุมัติโดย CEO)
  * วางไฟล์นี้ใน Google Sheets > ส่วนขยาย > Apps Script
  *
  * โครงสร้างข้อมูล 3 ชั้น
  *   พนักงาน    ทะเบียนคน ไม่เคยลบใคร คนลาออกใส่ "วันที่ออก"
  *   บันทึกเวร  แหล่งข้อมูลจริง 1 แถว = 1 คน 1 วัน ต่อท้ายลงล่างไปเรื่อย ๆ
  *   รอบ xxxx   ตารางแนวกว้างสำหรับดู/พิมพ์ สร้างใหม่จากบันทึกเวรได้ตลอด ลบทิ้งได้
+ * โอทีใช้โครงเดียวกัน: บันทึกโอที (แหล่งข้อมูลจริง) -> โอที xxxx (ตารางแนวกว้าง) ผู้อนุมัติคือ CEO
  *
  * Script properties ที่ต้องตั้ง (Project Settings > Script properties):
  *   CHANNEL_ACCESS_TOKEN  = Channel access token (long-lived) ของ Messaging API
@@ -24,6 +25,10 @@ const CFG = {
   VIEW_PREFIX: 'รอบ ',          // ชีทตารางแนวกว้าง เช่น "รอบ 2569-09"
   LEGACY_SHEET: 'รหัสพนักงาน',   // ชีทเดิมแนวกว้าง ใช้ตอนย้ายข้อมูลครั้งเดียว
 
+  OT_LOG_SHEET: 'บันทึกโอที',    // แหล่งข้อมูลจริงของโอที 1 แถว = 1 คน 1 วัน
+  OT_REQ_SHEET: 'คำขอโอที',
+  OT_VIEW_PREFIX: 'โอที ',       // ชีทตารางโอทีแนวกว้าง เช่น "โอที 2569-09"
+
   CUT_DAY: 26,                  // รอบสรุป = วันที่ 26 เดือนก่อน ถึง 25 เดือนนี้
   BACK_DAYS: 14,                // ฟอร์มให้แจ้งย้อนหลังได้กี่วัน
   AHEAD_PERIODS: 1,             // ฟอร์มให้แจ้งล่วงหน้าอีกกี่รอบ
@@ -34,18 +39,19 @@ const CFG = {
 
   ROLE_LEAD: 'หัวหน้างาน',
   ROLE_HR: 'HR',
+  ROLE_CEO: 'CEO',              // ผู้อนุมัติโอที
 
   ST_PENDING: 'รออนุมัติ',
   ST_OK: 'อนุมัติ',
-  AUTO_BY: 'อัตโนมัติ (แจ้งย้อนหลัง)',   // ผู้พิจารณาของเวรย้อนหลังที่ลงตารางโดยไม่ผ่าน HR
+  AUTO_BY: 'อัตโนมัติ',         // ผู้พิจารณาของรายการที่ลงตารางโดยไม่ต้องขออนุมัติ (เวรทุกกรณี และโอทีย้อนหลังที่ยังไม่เคยมี)
   ST_NO: 'ไม่อนุมัติ',
   ST_OLD: 'แทนที่',             // ถูกคำขอที่อนุมัติทีหลังเขียนทับ
   PENDING: '(รอ) '
 };
 
 const EMP_HEADERS = ['รหัส', 'ชื่อ - สกุล', 'ชื่อเล่น', 'แผนก', 'ชื่อในกลุ่มไลน์',
-  'ค่าแรง', 'หน่วย', 'วันเริ่มงาน', 'วันที่ออก', 'หมายเหตุ'];
-const EMP_COL = { code: 1, name: 2, nick: 3, dept: 4, lineName: 5, wage: 6, unit: 7, from: 8, to: 9 };
+  'วันเริ่มงาน', 'วันที่ออก', 'หมายเหตุ'];
+const EMP_COL = { code: 1, name: 2, nick: 3, dept: 4, lineName: 5, from: 6, to: 7 };
 
 const LOG_HEADERS = ['วันที่', 'รหัส', 'ชื่อ', 'กะ', 'สถานะ', 'เลขคำขอ', 'ผู้แจ้ง', 'ผู้พิจารณา', 'เวลาอัปเดต'];
 const LOG_COL = { ymd: 1, code: 2, label: 3, shift: 4, status: 5, reqId: 6, by: 7, approver: 8, at: 9 };
@@ -53,7 +59,11 @@ const LOG_COL = { ymd: 1, code: 2, label: 3, shift: 4, status: 5, reqId: 6, by: 
 const REQ_HEADERS = ['เลขคำขอ', 'เวลาส่ง', 'userId ผู้แจ้ง', 'ผู้แจ้ง', 'วันที่ทำงาน',
   'สรุป', 'รายการ (JSON)', 'คำเตือน (JSON)', 'สถานะ', 'ผู้พิจารณา', 'เวลาพิจารณา', 'เหตุผล/หมายเหตุ'];
 
-const VIEW_HEAD = ['รหัส', 'ชื่อ - สกุล', 'ชื่อในกลุ่มไลน์', 'แผนก', 'ชื่อเล่น', 'ค่าแรง', 'หน่วย'];
+const VIEW_HEAD = ['รหัส', 'ชื่อ - สกุล', 'ชื่อในกลุ่มไลน์', 'แผนก', 'ชื่อเล่น'];
+
+const OT_HEADERS = ['วันที่', 'รหัส', 'ชื่อ', 'ชั่วโมง', 'ทำงานวันหยุด', 'สถานะ', 'เลขคำขอ', 'ผู้แจ้ง', 'ผู้พิจารณา', 'เวลาอัปเดต'];
+const OT_COL = { ymd: 1, code: 2, label: 3, hours: 4, holiday: 5, status: 6, reqId: 7, by: 8, approver: 9, at: 10 };
+const OT_TAIL = ['รวม OT', 'ทำงานวันหยุด'];
 
 /* ================= เมนูในชีท ================= */
 
@@ -62,6 +72,10 @@ function onOpen() {
     .addItem('สร้าง/รีเฟรชตารางรอบปัจจุบัน', 'buildCurrentPeriod')
     .addItem('สร้าง/รีเฟรชตารางรอบถัดไป', 'buildNextPeriod')
     .addItem('สร้าง/รีเฟรชตารางรอบก่อนหน้า', 'buildPreviousPeriod')
+    .addSeparator()
+    .addItem('สร้าง/รีเฟรชตารางโอทีรอบปัจจุบัน', 'buildCurrentOt')
+    .addItem('สร้าง/รีเฟรชตารางโอทีรอบถัดไป', 'buildNextOt')
+    .addItem('สร้าง/รีเฟรชตารางโอทีรอบก่อนหน้า', 'buildPreviousOt')
     .addSeparator()
     .addItem('ตรวจการตั้งค่า', 'checkSetup')
     .addItem('ย้ายข้อมูลจากชีทเดิม (ครั้งเดียว)', 'migrateFromLegacy')
@@ -78,7 +92,7 @@ function setup() {
     const sh = ss.insertSheet(CFG.EMP_SHEET);
     sh.getRange(1, 1, 1, EMP_HEADERS.length).setValues([EMP_HEADERS]).setFontWeight('bold');
     sh.getRange('A:A').setNumberFormat('@');
-    sh.getRange('H:I').setNumberFormat('yyyy-mm-dd');
+    sh.getRange('F:G').setNumberFormat('yyyy-mm-dd');
     sh.setFrozenRows(1);
     sh.setColumnWidth(2, 180);
   }
@@ -102,10 +116,29 @@ function setup() {
 
   if (!ss.getSheetByName(CFG.USER_SHEET)) {
     const sh = ss.insertSheet(CFG.USER_SHEET);
-    sh.getRange(1, 1, 1, 4).setValues([['userId', 'ชื่อ', 'บทบาท (หัวหน้างาน / HR)',
+    sh.getRange(1, 1, 1, 4).setValues([['userId', 'ชื่อ', 'บทบาท (หัวหน้างาน / HR / CEO)',
       'แผนกที่ดูแล (คั่นด้วย , ว่าง = ทุกแผนก)']]).setFontWeight('bold');
-    sh.getRange('C2:C200').setDataValidation(
-      SpreadsheetApp.newDataValidation().requireValueInList([CFG.ROLE_LEAD, CFG.ROLE_HR], true).build());
+    sh.setFrozenRows(1);
+  }
+  // ตั้งหัวคอลัมน์และรายการบทบาทใหม่ทุกครั้ง ชีทที่สร้างไว้ก่อนมีระบบโอทีจะได้เลือก CEO ได้ด้วย
+  ss.getSheetByName(CFG.USER_SHEET).getRange(1, 3).setValue('บทบาท (หัวหน้างาน / HR / CEO)');
+  ss.getSheetByName(CFG.USER_SHEET).getRange('C2:C200').setDataValidation(
+    SpreadsheetApp.newDataValidation().requireValueInList([CFG.ROLE_LEAD, CFG.ROLE_HR, CFG.ROLE_CEO], true).build());
+
+  if (!ss.getSheetByName(CFG.OT_LOG_SHEET)) {
+    const sh = ss.insertSheet(CFG.OT_LOG_SHEET);
+    sh.getRange(1, 1, 1, OT_HEADERS.length).setValues([OT_HEADERS]).setFontWeight('bold');
+    sh.getRange('A:A').setNumberFormat('yyyy-mm-dd');
+    sh.getRange('B:B').setNumberFormat('@');
+    sh.getRange('J:J').setNumberFormat('yyyy-mm-dd hh:mm');
+    sh.setFrozenRows(1);
+  }
+
+  if (!ss.getSheetByName(CFG.OT_REQ_SHEET)) {
+    const sh = ss.insertSheet(CFG.OT_REQ_SHEET);
+    sh.getRange(1, 1, 1, REQ_HEADERS.length).setValues([REQ_HEADERS]).setFontWeight('bold');
+    sh.getRange('A:A').setNumberFormat('@');
+    sh.getRange('E:E').setNumberFormat('@');
     sh.setFrozenRows(1);
   }
 
@@ -120,7 +153,7 @@ function checkSetup() {
 
   say('เขตเวลาชีท: ' + tz_() + (tz_() === 'Asia/Bangkok' ? ' (ถูกต้อง)' : ' <-- ควรเป็น Asia/Bangkok'));
 
-  [CFG.EMP_SHEET, CFG.LOG_SHEET, CFG.REQ_SHEET, CFG.USER_SHEET].forEach(n => {
+  [CFG.EMP_SHEET, CFG.LOG_SHEET, CFG.REQ_SHEET, CFG.USER_SHEET, CFG.OT_LOG_SHEET, CFG.OT_REQ_SHEET].forEach(n => {
     if (!ss_().getSheetByName(n)) warn('ยังไม่มีชีท "' + n + '" (กด Run ฟังก์ชัน setup)');
   });
   if (!ss_().getSheetByName(CFG.EMP_SHEET)) return log.join('\n');
@@ -148,6 +181,16 @@ function checkSetup() {
   say('บันทึกเวรทั้งหมด: ' + rows.length + ' แถว');
   const pend = rows.filter(r => r.status === CFG.ST_PENDING).length;
   if (pend) say('มีเวรที่ยังรออนุมัติ: ' + pend + ' รายการ');
+
+  if (ss_().getSheetByName(CFG.OT_LOG_SHEET)) {
+    const ot = readOtLog_();
+    say('บันทึกโอทีทั้งหมด: ' + ot.length + ' แถว');
+    const otPend = ot.filter(r => r.status === CFG.ST_PENDING).length;
+    if (otPend) say('มีโอทีที่ยังรออนุมัติ: ' + otPend + ' รายการ');
+  }
+  if (ss_().getSheetByName(CFG.USER_SHEET) && !usersByRole_(CFG.ROLE_CEO).length) {
+    warn('ยังไม่มีผู้ใช้บทบาท ' + CFG.ROLE_CEO + ' ในชีท "' + CFG.USER_SHEET + '" จึงยังไม่มีใครอนุมัติโอทีได้');
+  }
 
   ['CHANNEL_ACCESS_TOKEN', 'LOGIN_CHANNEL_ID', 'LIFF_ID'].forEach(k => {
     if (!prop_(k)) warn('ยังไม่ได้ตั้ง Script property: ' + k);
@@ -183,6 +226,10 @@ function handleApi_(b) {
       case 'pending': needRole_(user, [CFG.ROLE_HR]); return { ok: true, pending: listPending_() };
       case 'approve': return apiApprove_(needRole_(user, [CFG.ROLE_HR]), b);
       case 'reject': return apiReject_(needRole_(user, [CFG.ROLE_HR]), b);
+      case 'otSubmit': return apiOtSubmit_(needRole_(user, [CFG.ROLE_LEAD, CFG.ROLE_HR, CFG.ROLE_CEO]), b);
+      case 'otPending': needRole_(user, [CFG.ROLE_CEO]); return { ok: true, pending: listOtPending_() };
+      case 'otApprove': return apiOtApprove_(needRole_(user, [CFG.ROLE_CEO]), b);
+      case 'otReject': return apiOtReject_(needRole_(user, [CFG.ROLE_CEO]), b);
       default: throw new Error('ไม่รู้จักคำสั่ง ' + b.action);
     }
   } catch (err) {
@@ -220,6 +267,7 @@ function apiInit_(who, user) {
     out.pending = listPending_();
     out.noCode = readEmployeeWarnings_();
   }
+  if (user.role === CFG.ROLE_CEO) out.otPending = listOtPending_();
   return out;
 }
 
@@ -247,59 +295,37 @@ function apiSubmit_(user, p) {
     });
     if (!entries.length) throw new Error('ยังไม่ได้เลือกพนักงาน');
 
+    // แจ้งวันทำงานไม่ต้องขออนุมัติแล้ว ทั้งล่วงหน้าและย้อนหลัง ลงตารางเป็นอนุมัติทันที และไม่ push หาใคร
+    // เวรเดิมของคน-วันเดียวกัน (ที่อนุมัติแล้ว และที่ค้างรออนุมัติจากระบบเดิม) ถือว่าถูกแทนที่
     const log = readLog_();
-    const state = dayState_(log, p.date);
-    entries.forEach(en => { en.old = (state[en.code] || {}).ok ? state[en.code].ok.shift : ''; });
-
-    // HR แจ้งเอง ลงตารางได้เลยทุกกรณี
-    // หัวหน้างานแจ้งย้อนหลังในวันที่คนนั้นยังไม่มีเวร (ลืมแจ้ง) ก็ลงตารางได้เลย
-    // ส่วนการแก้เวรที่อนุมัติไว้แล้ว และวันนี้เป็นต้นไป ยังต้องผ่าน HR
-    const isHr = user.role === CFG.ROLE_HR;
-    const retro = p.date < ymd_(new Date());
-    const direct = isHr ? entries : (retro ? entries.filter(en => !en.old) : []);
-    const wait = entries.filter(en => direct.indexOf(en) < 0);
-
-    const warnings = [];
-    wait.forEach(en => {
-      const s = state[en.code] || {};
-      if (s.pending) warnings.push(en.label + ': มีคำขออื่นรออยู่ (#' + s.pending.reqId + ') คำขอนี้จะแทนที่เมื่ออนุมัติ');
+    const by = user.role === CFG.ROLE_HR ? user.name : CFG.AUTO_BY;
+    const now = new Date();
+    const stale = {};
+    log.forEach(r => {
+      if (r.ymd !== p.date || !seen[r.code]) return;
+      if (r.status !== CFG.ST_OK && r.status !== CFG.ST_PENDING) return;
+      if (r.status === CFG.ST_PENDING) stale[r.reqId] = 1;
+      setLogStatus_(r.row, CFG.ST_OLD, by, now);
+      r.status = CFG.ST_OLD;
+    });
+    // คำขอค้างที่ไม่เหลือรายการรออนุมัติแล้ว ปิดไปเลย
+    const reqs = Object.keys(stale).length ? readReqRows_() : [];
+    Object.keys(stale).forEach(id => {
+      if (log.some(r => r.reqId === id && r.status === CFG.ST_PENDING)) return;
+      const req = reqs.find(x => x.id === id);
+      if (req && req.status === CFG.ST_PENDING) updateReq_(req, CFG.ST_OLD, by, 'ถูกแทนที่ด้วยการแจ้งทีหลัง');
     });
 
-    const out = { ok: true, id: null, dateLabel: thDate_(p.date, true), groups: [], warnings: warnings, saved: null };
-    if (direct.length) {
-      // เวรที่อนุมัติไว้ก่อนหน้าของคน-วันเดียวกัน ถือว่าถูกแทนที่ (เกิดได้เฉพาะตอน HR แจ้งเอง)
-      const now = new Date();
-      log.forEach(r => {
-        if (r.ymd === p.date && r.status === CFG.ST_OK && direct.some(en => en.code === r.code)) {
-          setLogStatus_(r.row, CFG.ST_OLD, user.name, now);
-        }
-      });
-      const sid = isHr
-        ? saveReq_(user, p.date, direct, [], CFG.ST_OK, user.name, 'HR แจ้งเอง ไม่ต้องขออนุมัติ')
-        : saveReq_(user, p.date, direct, [], CFG.ST_OK, CFG.AUTO_BY, 'แจ้งย้อนหลังในวันที่ยังไม่มีเวร ไม่ต้องขออนุมัติ');
-      out.saved = { id: sid, groups: groupByShift_(direct) };
-    }
-    if (wait.length) {
-      out.id = saveReq_(user, p.date, wait, warnings, CFG.ST_PENDING, '', '');
-      out.groups = groupByShift_(wait);
-    }
+    const sid = saveReq_(user, p.date, entries, [], CFG.ST_OK, by, 'แจ้งวันทำงาน ไม่ต้องขออนุมัติ');
     SpreadsheetApp.flush();
-
-    if (wait.length) {
-      const req = { id: out.id, fromName: user.name, date: p.date, entries: wait, warnings: warnings };
-      try {
-        hrUsers_().forEach(h => push_(h.userId, [hrCard_(req)]));
-      } catch (err) {
-        console.error('แจ้ง HR ไม่สำเร็จ', err);
-      }
-    }
-    return out;
+    return { ok: true, id: null, dateLabel: thDate_(p.date, true), groups: [], warnings: [],
+             saved: { id: sid, groups: groupByShift_(entries) } };
   } finally {
     lock.releaseLock();
   }
 }
 
-/** เขียนคำขอ 1 ใบลงบันทึกเวรและชีทคำขอ คืนเลขคำขอ ถ้ามี approver แปลว่าลงเป็นอนุมัติทันที */
+/** เขียนใบแจ้ง 1 ใบลงบันทึกเวรและชีทคำขอ คืนเลขคำขอ */
 function saveReq_(user, date, entries, warnings, status, approver, note) {
   const id = nextId_();
   const now = new Date();
@@ -324,6 +350,7 @@ function saveReq_(user, date, entries, warnings, status, approver, note) {
   return id;
 }
 
+/* approve / reject / pending ของเวร เหลือไว้เคลียร์คำขอที่ค้างรออนุมัติจากก่อนยกเลิกขั้นตอนอนุมัติ การแจ้งใหม่ไม่ผ่านทางนี้แล้ว */
 function apiApprove_(user, p) {
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
@@ -407,7 +434,7 @@ function handleLine_(events) {
     try {
       if (ev.type === 'join' || ev.type === 'memberJoined') {
         reply_(ev.replyToken, [text_('สวัสดีครับ ผมชื่อ ' + CFG.BOT_NAME +
-          ' ดูแลเรื่องตารางทำงาน\nพิมพ์ "' + CFG.BOT_NAME + '" เมื่อไหร่ก็ได้ เดี๋ยวผมส่งปุ่มให้กดครับ'), menuFlex_()]);
+          ' ดูแลเรื่องตารางทำงานและโอที\nพิมพ์ "' + CFG.BOT_NAME + '" เมื่อไหร่ก็ได้ เดี๋ยวผมส่งปุ่มให้กดครับ'), menuFlex_()]);
         return;
       }
       if (ev.type !== 'message' || ev.message.type !== 'text') return;
@@ -419,7 +446,7 @@ function handleLine_(events) {
       if (cmd === null && !isDirect) return;   // ข้อความอื่นในกลุ่ม บอทจะเงียบ
 
       const t = (cmd === null ? raw : cmd).trim();
-      if (!t || t === 'เมนู' || t === 'แจ้งงาน') reply_(ev.replyToken, [menuFlex_()]);
+      if (!t || t === 'เมนู' || t === 'แจ้งงาน' || t === 'โอที' || t === 'แจ้งโอที') reply_(ev.replyToken, [menuFlex_()]);
       else if (t === 'ดูตารางวันนี้' || t === 'ตารางวันนี้' || t === 'วันนี้') replyQ_(ev.replyToken, scheduleText_(0));
       else if (t === 'ดูตารางพรุ่งนี้' || t === 'ตารางพรุ่งนี้' || t === 'พรุ่งนี้') replyQ_(ev.replyToken, scheduleText_(1));
       else if (t.toLowerCase() === 'myid') {
@@ -480,10 +507,11 @@ function menuFlex_() {
       type: 'bubble', size: 'kilo',
       body: {
         type: 'box', layout: 'vertical', contents: [
-          { type: 'text', text: CFG.BOT_NAME + ' · ตารางทำงาน', weight: 'bold', size: 'lg' },
+          { type: 'text', text: CFG.BOT_NAME + ' · ตารางทำงานและโอที', weight: 'bold', size: 'lg' },
           { type: 'text', text: 'กดปุ่มได้เลย ไม่ต้องพิมพ์', size: 'sm', color: '#5E6B61', margin: 'xs' },
           btn('แจ้งวันทำงาน', { type: 'uri', uri: liffUrl_() }, true),
-          btn('รายการรออนุมัติ (HR)', { type: 'uri', uri: liffUrl_('page=approve') }),
+          btn('แจ้งโอที', { type: 'uri', uri: liffUrl_('page=ot') }, true),
+          btn('โอทีรออนุมัติ (CEO)', { type: 'uri', uri: liffUrl_('page=otapprove') }),
           btn('ดูตารางวันนี้', { type: 'message', text: CFG.BOT_NAME + ' ตารางวันนี้' }),
           btn('ดูตารางพรุ่งนี้', { type: 'message', text: CFG.BOT_NAME + ' ตารางพรุ่งนี้' })
         ]
@@ -492,21 +520,27 @@ function menuFlex_() {
   };
 }
 
-function hrCard_(req) {
+function otCard_(req) {
+  const edit = req.entries.some(en => en.old);
+  return reqCard_(req, otGroups_(req.entries), edit ? 'ขอแก้โอทีที่อนุมัติแล้ว' : 'คำขอโอที', 'otapprove');
+}
+
+/** การ์ดแจ้งผู้อนุมัติ groups = [{ shift: หัวข้อกลุ่ม, names: [] }] */
+function reqCard_(req, groups, title, page) {
   const rows = [];
-  groupByShift_(req.entries).forEach(g => {
+  groups.forEach(g => {
     rows.push({ type: 'text', text: g.shift, weight: 'bold', size: 'sm', margin: 'md' });
     rows.push({ type: 'text', text: g.names.join(', '), size: 'sm', wrap: true, color: '#1D2B21' });
   });
   (req.warnings || []).forEach(w => rows.push({ type: 'text', text: '⚠ ' + w, size: 'xs', wrap: true, color: '#B8741A', margin: 'sm' }));
   return {
-    type: 'flex', altText: 'คำขอ #' + req.id + ' รออนุมัติ',
+    type: 'flex', altText: title + ' #' + req.id + ' รออนุมัติ',
     contents: {
       type: 'bubble', size: 'kilo',
       body: {
         type: 'box', layout: 'vertical', contents: [
           { type: 'box', layout: 'horizontal', contents: [
-            { type: 'text', text: 'คำขอ #' + req.id, weight: 'bold', flex: 1 },
+            { type: 'text', text: title + ' #' + req.id, weight: 'bold', flex: 1 },
             { type: 'text', text: 'รออนุมัติ', size: 'xs', color: '#B8741A', align: 'end', gravity: 'center' }
           ] },
           { type: 'text', text: 'จาก ' + req.fromName, size: 'xs', color: '#5E6B61' },
@@ -516,7 +550,7 @@ function hrCard_(req) {
       footer: {
         type: 'box', layout: 'vertical', contents: [
           { type: 'button', style: 'primary', color: '#2F6B45', height: 'sm',
-            action: { type: 'uri', label: 'ตรวจและอนุมัติ', uri: liffUrl_('page=approve&id=' + req.id) } }
+            action: { type: 'uri', label: 'ตรวจและอนุมัติ', uri: liffUrl_('page=' + page + '&id=' + req.id) } }
         ]
       }
     }
@@ -530,6 +564,7 @@ function quickReply_() {
   const item = (label, action) => ({ type: 'action', action: Object.assign({ label: label }, action) });
   return { items: [
     item('แจ้งวันทำงาน', { type: 'uri', uri: liffUrl_() }),
+    item('แจ้งโอที', { type: 'uri', uri: liffUrl_('page=ot') }),
     item('ตารางวันนี้', { type: 'message', text: CFG.BOT_NAME + ' ตารางวันนี้' }),
     item('ตารางพรุ่งนี้', { type: 'message', text: CFG.BOT_NAME + ' ตารางพรุ่งนี้' }),
     item('เมนู', { type: 'message', text: CFG.BOT_NAME })
@@ -587,7 +622,6 @@ function readEmployees_() {
       label: nick || shortName_(name) || code,
       dept: String(r[EMP_COL.dept - 1]).trim() || 'ไม่ระบุแผนก',
       lineName: String(r[EMP_COL.lineName - 1]).trim(),
-      wage: r[EMP_COL.wage - 1], unit: String(r[EMP_COL.unit - 1]).trim(),
       from: toYmd_(r[EMP_COL.from - 1]), to: toYmd_(r[EMP_COL.to - 1])
     });
   });
@@ -680,10 +714,10 @@ function getUser_(userId) {
   return null;
 }
 
-function hrUsers_() {
+function usersByRole_(role) {
   const sh = ss_().getSheetByName(CFG.USER_SHEET);
   return sh.getDataRange().getValues().slice(1)
-    .filter(r => String(r[2]).trim() === CFG.ROLE_HR && String(r[0]).trim())
+    .filter(r => String(r[2]).trim() === role && String(r[0]).trim())
     .map(r => ({ userId: String(r[0]).trim(), name: String(r[1]) }));
 }
 
@@ -698,8 +732,8 @@ function nextId_() {
   return 'R' + ('000' + sh.getLastRow()).slice(-4);
 }
 
-function readReqRows_() {
-  const sh = need_(CFG.REQ_SHEET);
+function readReqRows_(sheetName) {
+  const sh = need_(sheetName || CFG.REQ_SHEET);
   const v = sh.getDataRange().getValues();
   const out = [];
   for (let i = 1; i < v.length; i++) {
@@ -714,8 +748,8 @@ function readReqRows_() {
   return out;
 }
 
-function findReq_(id) {
-  const r = readReqRows_().find(x => x.id === id);
+function findReq_(id, sheetName) {
+  const r = readReqRows_(sheetName).find(x => x.id === id);
   if (!r) throw new Error('ไม่พบคำขอ #' + id);
   return r;
 }
@@ -742,25 +776,13 @@ function buildNextPeriod() { buildPeriodSheet_(nextPeriod_(period_(ymd_(new Date
 
 /** สร้าง/รีเฟรชชีท "รอบ xxxx" จากบันทึกเวร ลบทิ้งแล้วสร้างใหม่ได้เสมอ */
 function buildPeriodSheet_(p) {
-  const ss = ss_();
   const dates = periodDates_(p);
   const emps = readEmployees_().filter(e => activeBetween_(e, p.start, p.end));
   const log = readLog_();
   const state = {};
   dates.forEach(d => (state[d] = dayState_(log, d)));
 
-  const name = CFG.VIEW_PREFIX + p.key;
-  let sh = ss.getSheetByName(name);
-  if (sh) {
-    sh.clear();
-    sh.clearConditionalFormatRules();
-    sh.getDataRange().clearNote();
-    sh.setFrozenRows(0);
-    sh.setFrozenColumns(0);
-    // ปลด merge เก่าออกก่อน ไม่งั้น setFrozenColumns จะผ่ากลางเซลล์ที่ merge ไว้แล้ว error
-    sh.getRange(1, 1, sh.getMaxRows(), sh.getMaxColumns()).breakApart();
-  }
-  else sh = ss.insertSheet(name);
+  const sh = freshSheet_(CFG.VIEW_PREFIX + p.key);
 
   const nCol = VIEW_HEAD.length + dates.length;
 
@@ -782,7 +804,7 @@ function buildPeriodSheet_(p) {
 
   // แถว 4 เป็นต้นไป
   const body = emps.map(e => {
-    const head = [e.code, e.name, e.lineName, e.dept, e.nick, e.wage, e.unit];
+    const head = [e.code, e.name, e.lineName, e.dept, e.nick];
     const cells = dates.map(d => {
       const s = (state[d] || {})[e.code] || {};
       if (s.pending) return CFG.PENDING + s.pending.shift;
@@ -790,10 +812,7 @@ function buildPeriodSheet_(p) {
     });
     return head.concat(cells);
   });
-  if (body.length) {
-    sh.getRange(4, 1, body.length, nCol).setValues(body);
-    sh.getRange(4, 6, body.length, 1).setNumberFormat('#,##0.00'); // ค่าแรง
-  }
+  if (body.length) sh.getRange(4, 1, body.length, nCol).setValues(body);
 
   // โน้ตเลขคำขอบนช่องที่ยังรออนุมัติ
   emps.forEach((e, r) => dates.forEach((d, c) => {
@@ -821,6 +840,371 @@ function buildPeriodSheet_(p) {
   return sh.getName();
 }
 
+/** คืนชีทเปล่าพร้อมสร้างตารางแนวกว้างใหม่ทั้งใบ (ถ้ามีอยู่แล้วจะล้างทิ้ง) */
+function freshSheet_(name) {
+  const sh = ss_().getSheetByName(name);
+  if (!sh) return ss_().insertSheet(name);
+  sh.clear();
+  sh.clearConditionalFormatRules();
+  sh.getDataRange().clearNote();
+  sh.setFrozenRows(0);
+  sh.setFrozenColumns(0);
+  // ปลด merge เก่าออกก่อน ไม่งั้น setFrozenColumns จะผ่ากลางเซลล์ที่ merge ไว้แล้ว error
+  sh.getRange(1, 1, sh.getMaxRows(), sh.getMaxColumns()).breakApart();
+  return sh;
+}
+
+/* ================= โอที ================= */
+/*
+ * โครงเดียวกับเวร: "บันทึกโอที" คือแหล่งข้อมูลจริง ต่อท้ายลงล่างอย่างเดียว
+ * ค่าจริงของ (วัน, คน) = แถวสถานะ "อนุมัติ" ที่อยู่ล่างสุด
+ * ที่ต่างจากเวร: โอทีต้องให้ CEO อนุมัติ (เวรไม่ต้องขออนุมัติแล้ว) ซึ่ง CEO จะกดทีหลังวันทำงานก็ได้
+ * ยกเว้นแจ้งวันย้อนหลังในวันที่คนนั้นยังไม่เคยมีโอทีและไม่มีคำขอค้าง ถือเป็นการบันทึกเข้าระบบ ลงได้เลย
+ * ส่วนการแก้โอทีที่อนุมัติไว้แล้วต้องกลับไปหา CEO เสมอ พร้อมบอกว่าเดิมอนุมัติไว้เท่าไรและใครเป็นคนขอแก้
+ */
+
+function normHours_(v) {
+  const n = Number(v);
+  if (v === '' || v == null || !isFinite(n) || n < 0 || n > 24 || (n * 2) % 1) {
+    throw new Error('จำนวนชั่วโมงโอทีไม่ถูกต้อง "' + v + '" (ใส่ได้ทีละครึ่งชั่วโมง เช่น 2 หรือ 2.5)');
+  }
+  return n;
+}
+
+/** ข้อความสั้นของโอที 1 รายการ เช่น "3 ชม.", "3 ชม. (วันหยุด)", "ทำงานวันหยุด" (ต้องตรงกับ hLabel ใน index.html) */
+function otLabel_(en) {
+  if (!en.hours) return en.holiday ? 'ทำงานวันหยุด' : '0 ชม.';
+  return en.hours + ' ชม.' + (en.holiday ? ' (วันหยุด)' : '');
+}
+
+/** จัดกลุ่มแบบเดียวกับ groupByShift_ คืน [{ shift: ข้อความโอที, names: [] }] เพื่อใช้การ์ดและหน้าฟอร์มร่วมกับเวรได้ */
+function otGroups_(entries) {
+  const g = {}, key = {};
+  entries.forEach(e => {
+    const k = otLabel_(e);
+    (g[k] = g[k] || []).push(e.label);
+    key[k] = e.hours * 2 + (e.holiday ? 1 : 0);
+  });
+  return Object.keys(g).sort((a, b) => key[a] - key[b]).map(k => ({ shift: k, names: g[k] }));
+}
+
+function otSummary_(entries) {
+  return otGroups_(entries).map(g => g.shift + ': ' + g.names.join(', ')).join('\n');
+}
+
+function apiOtSubmit_(user, p) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const rng = formRange_();
+    if (!p.date || p.date < rng.from || p.date > rng.to) {
+      throw new Error('วันที่ ' + p.date + ' อยู่นอกช่วงที่แจ้งได้ (' + rng.from + ' ถึง ' + rng.to + ')');
+    }
+
+    const byCode = indexBy_(readEmployees_().filter(e => activeOn_(e, p.date)));
+    const seen = {};
+    const entries = [];
+    (p.groups || []).forEach(g => {
+      const hours = normHours_(g.hours);
+      const holiday = !!g.holiday;
+      if (!hours && !holiday) throw new Error('ยังไม่ได้ใส่ชั่วโมงโอที');
+      (g.codes || []).forEach(c => {
+        const e = byCode[c];
+        if (!e) throw new Error('ไม่พบรหัสพนักงาน ' + c + ' ที่ทำงานอยู่ในวันที่ ' + p.date);
+        if (seen[c]) throw new Error(e.label + ' ถูกเลือกมากกว่า 1 กลุ่ม');
+        seen[c] = 1;
+        entries.push({ code: c, label: e.label, hours: hours, holiday: holiday });
+      });
+    });
+    if (!entries.length) throw new Error('ยังไม่ได้เลือกพนักงาน');
+
+    const log = readOtLog_();
+    const state = dayState_(log, p.date);
+    entries.forEach(en => { en.old = (state[en.code] || {}).ok ? otLabel_(state[en.code].ok) : ''; });
+
+    // CEO แจ้งเอง ลงได้เลยทุกกรณี
+    // หัวหน้างานแจ้งย้อนหลังในวันที่คนนั้นยังไม่มีโอทีและไม่มีคำขอค้าง ถือเป็นการบันทึกเข้าระบบ ลงได้เลย
+    // นอกนั้น (วันนี้เป็นต้นไป และการแก้โอทีที่อนุมัติไว้แล้ว) ต้องให้ CEO อนุมัติ
+    const isCeo = user.role === CFG.ROLE_CEO;
+    const retro = p.date < ymd_(new Date());
+    const fresh = en => !en.old && !(state[en.code] || {}).pending;
+    const direct = isCeo ? entries : (retro ? entries.filter(fresh) : []);
+    const wait = entries.filter(en => direct.indexOf(en) < 0);
+    const out = { ok: true, id: null, dateLabel: thDate_(p.date, true), groups: [], warnings: [], saved: null };
+
+    if (direct.length) {
+      const by = isCeo ? user.name : CFG.AUTO_BY;
+      // โอทีของคน-วันเดียวกันที่อนุมัติไว้หรือยังรออยู่ ถือว่าถูกแทนที่ (เกิดได้เฉพาะตอน CEO แจ้งเอง)
+      const now = new Date();
+      const stale = {};
+      log.forEach(r => {
+        if (r.ymd !== p.date || !direct.some(en => en.code === r.code)) return;
+        if (r.status !== CFG.ST_OK && r.status !== CFG.ST_PENDING) return;
+        if (r.status === CFG.ST_PENDING) stale[r.reqId] = 1;
+        setOtStatus_(r.row, CFG.ST_OLD, by, now);
+        r.status = CFG.ST_OLD;
+      });
+      // คำขอที่ไม่เหลือรายการรออนุมัติแล้ว ปิดไปเลย CEO จะได้ไม่เห็นค้าง
+      const reqs = Object.keys(stale).length ? readReqRows_(CFG.OT_REQ_SHEET) : [];
+      Object.keys(stale).forEach(id => {
+        if (log.some(r => r.reqId === id && r.status === CFG.ST_PENDING)) return;
+        const req = reqs.find(x => x.id === id);
+        if (req && req.status === CFG.ST_PENDING) updateOtReq_(req, CFG.ST_OLD, by, 'ถูกแทนที่ด้วยการบันทึกทีหลัง');
+      });
+      const sid = saveOtReq_(user, p.date, direct, [], CFG.ST_OK, by,
+        isCeo ? 'CEO แจ้งเอง ไม่ต้องขออนุมัติ' : 'แจ้งย้อนหลังในวันที่ยังไม่มีโอที บันทึกเข้าระบบโดยไม่ต้องขออนุมัติ');
+      out.saved = { id: sid, groups: otGroups_(direct) };
+    }
+
+    if (wait.length) {
+      wait.forEach(en => {
+        const s = state[en.code] || {};
+        // CEO ต้องเห็นว่าเดิมอนุมัติไว้เท่าไร ถูกขอแก้เป็นเท่าไร และใครเป็นคนแก้
+        if (en.old) out.warnings.push(en.label + ': อนุมัติไว้แล้ว ' + en.old + ' แต่ ' + user.name + ' ขอแก้เป็น ' + otLabel_(en));
+        if (s.pending) out.warnings.push(en.label + ': มีคำขออื่นรออยู่ (#' + s.pending.reqId + ') คำขอนี้จะแทนที่เมื่ออนุมัติ');
+      });
+      out.id = saveOtReq_(user, p.date, wait, out.warnings, CFG.ST_PENDING, '', '');
+      out.groups = otGroups_(wait);
+    }
+    SpreadsheetApp.flush();
+
+    if (wait.length) {
+      const req = { id: out.id, fromName: user.name, date: p.date, entries: wait, warnings: out.warnings };
+      try {
+        usersByRole_(CFG.ROLE_CEO).forEach(c => push_(c.userId, [otCard_(req)]));
+      } catch (err) {
+        console.error('แจ้ง CEO ไม่สำเร็จ', err);
+      }
+    }
+    return out;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** เขียนคำขอโอที 1 ใบลงบันทึกโอทีและชีทคำขอโอที คืนเลขคำขอ ถ้ามี approver แปลว่าลงเป็นอนุมัติทันที */
+function saveOtReq_(user, date, entries, warnings, status, approver, note) {
+  const sh = need_(CFG.OT_REQ_SHEET);
+  const id = 'T' + ('000' + sh.getLastRow()).slice(-4);
+  const now = new Date();
+  const rows = entries.map(en => {
+    const row = [];
+    row[OT_COL.ymd - 1] = date;
+    row[OT_COL.code - 1] = en.code;
+    row[OT_COL.label - 1] = en.label;
+    row[OT_COL.hours - 1] = en.hours;
+    row[OT_COL.holiday - 1] = en.holiday ? 'ใช่' : '';
+    row[OT_COL.status - 1] = status;
+    row[OT_COL.reqId - 1] = id;
+    row[OT_COL.by - 1] = user.name;
+    row[OT_COL.approver - 1] = approver;
+    row[OT_COL.at - 1] = now;
+    return row;
+  });
+  const log = need_(CFG.OT_LOG_SHEET);
+  log.getRange(Math.max(log.getLastRow(), 1) + 1, 1, rows.length, OT_HEADERS.length).setValues(rows);
+  sh.appendRow([
+    id, now, user.userId, user.name, date, otSummary_(entries),
+    JSON.stringify(entries), JSON.stringify(warnings), status,
+    approver, approver ? now : '', note
+  ]);
+  return id;
+}
+
+function apiOtApprove_(user, p) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const req = findReq_(p.id, CFG.OT_REQ_SHEET);
+    if (req.status !== CFG.ST_PENDING) throw new Error('คำขอโอที #' + req.id + ' ถูกพิจารณาไปแล้ว (' + req.status + ')');
+
+    const edits = p.edits || {};
+    const changed = [];
+    req.entries.forEach(en => {
+      const v = edits[en.code];
+      if (v === undefined || v === null || v === '' || normHours_(v) === en.hours) return;
+      changed.push(en.label + ' ' + en.hours + ' → ' + normHours_(v) + ' ชม.');
+      en.hours = normHours_(v);
+    });
+
+    const log = readOtLog_();
+    const mine = {};
+    log.forEach(r => { if (r.reqId === req.id && r.status === CFG.ST_PENDING) mine[r.code] = r; });
+
+    const skipped = [];
+    const ok = [];
+    const now = new Date();
+    req.entries.forEach(en => {
+      const row = mine[en.code];
+      if (!row) { skipped.push(en.label); return; }
+      // โอทีที่อนุมัติไว้ก่อนหน้าของคน-วันเดียวกัน ถือว่าถูกแทนที่
+      log.forEach(r => {
+        if (r.row !== row.row && r.ymd === row.ymd && r.code === row.code && r.status === CFG.ST_OK) {
+          setOtStatus_(r.row, CFG.ST_OLD, user.name, now);
+        }
+      });
+      need_(CFG.OT_LOG_SHEET).getRange(row.row, OT_COL.hours).setValue(en.hours);
+      setOtStatus_(row.row, CFG.ST_OK, user.name, now);
+      ok.push(en);
+    });
+
+    const note = [changed.length ? 'แก้ไข: ' + changed.join(', ') : '',
+                  skipped.length ? 'ข้าม (ไม่พบรายการรออนุมัติ): ' + skipped.join(', ') : ''].filter(String).join(' | ');
+    updateOtReq_(req, CFG.ST_OK, user.name, note);
+    SpreadsheetApp.flush();
+
+    let msg = 'คำขอโอที #' + req.id + ' วันที่ ' + thDate_(req.date, true) + ' อนุมัติแล้ว\n' + otSummary_(ok);
+    if (changed.length) msg += '\n\nCEO แก้ไข: ' + changed.join(', ');
+    if (skipped.length) msg += '\n\nไม่ได้บันทึก: ' + skipped.join(', ');
+    safePush_(req.fromUserId, [text_(msg)]);
+    return { ok: true, id: req.id, skipped: skipped };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function apiOtReject_(user, p) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const req = findReq_(p.id, CFG.OT_REQ_SHEET);
+    if (req.status !== CFG.ST_PENDING) throw new Error('คำขอโอที #' + req.id + ' ถูกพิจารณาไปแล้ว (' + req.status + ')');
+
+    const now = new Date();
+    readOtLog_().forEach(r => {
+      if (r.reqId === req.id && r.status === CFG.ST_PENDING) setOtStatus_(r.row, CFG.ST_NO, user.name, now);
+    });
+
+    const reason = String(p.reason || '').trim();
+    updateOtReq_(req, CFG.ST_NO, user.name, reason);
+    SpreadsheetApp.flush();
+
+    safePush_(req.fromUserId, [text_('คำขอโอที #' + req.id + ' วันที่ ' + thDate_(req.date, true) +
+      ' ไม่อนุมัติ' + (reason ? '\nเหตุผล: ' + reason : ''))]);
+    return { ok: true, id: req.id };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function readOtLog_() {
+  const sh = need_(CFG.OT_LOG_SHEET);
+  const last = sh.getLastRow();
+  if (last < 2) return [];
+  const out = [];
+  sh.getRange(2, 1, last - 1, OT_HEADERS.length).getValues().forEach((r, i) => {
+    const code = String(r[OT_COL.code - 1]).trim();
+    const ymd = toYmd_(r[OT_COL.ymd - 1]);
+    if (!code || !ymd) return;
+    out.push({
+      row: i + 2, ymd: ymd, code: code, label: String(r[OT_COL.label - 1]).trim(),
+      hours: Number(r[OT_COL.hours - 1]) || 0, holiday: !!String(r[OT_COL.holiday - 1]).trim(),
+      status: String(r[OT_COL.status - 1]).trim(), reqId: String(r[OT_COL.reqId - 1]).trim(),
+      by: String(r[OT_COL.by - 1]).trim()
+    });
+  });
+  return out;
+}
+
+function setOtStatus_(row, status, approver, at) {
+  const sh = need_(CFG.OT_LOG_SHEET);
+  sh.getRange(row, OT_COL.status).setValue(status);
+  sh.getRange(row, OT_COL.approver, 1, 2).setValues([[approver || '', at || new Date()]]);
+}
+
+function updateOtReq_(req, status, by, note) {
+  need_(CFG.OT_REQ_SHEET).getRange(req.row, 6, 1, 7).setValues([[otSummary_(req.entries),
+    JSON.stringify(req.entries), JSON.stringify(req.warnings), status, by, new Date(), note || '']]);
+}
+
+function listOtPending_() {
+  return readReqRows_(CFG.OT_REQ_SHEET).filter(r => r.status === CFG.ST_PENDING).map(r => ({
+    id: r.id, fromName: r.fromName, date: r.date, dateLabel: thDate_(r.date, true),
+    createdLabel: r.createdAt instanceof Date ? Utilities.formatDate(r.createdAt, tz_(), 'd/M HH:mm') : '',
+    entries: r.entries.map(e => ({ code: e.code, label: e.label, hours: e.hours, holiday: !!e.holiday, old: e.old || '' })),
+    warnings: r.warnings
+  }));
+}
+
+/* ================= ตารางโอทีแนวกว้างของแต่ละรอบ ================= */
+
+function buildCurrentOt() { buildOtSheet_(period_(ymd_(new Date()))); }
+function buildPreviousOt() { buildOtSheet_(prevPeriod_(period_(ymd_(new Date())))); }
+function buildNextOt() { buildOtSheet_(nextPeriod_(period_(ymd_(new Date())))); }
+
+/** สร้าง/รีเฟรชชีท "โอที xxxx" จากบันทึกโอที ทั้งรอบอยู่ในตารางเดียว ลบทิ้งแล้วสร้างใหม่ได้เสมอ */
+function buildOtSheet_(p) {
+  const dates = periodDates_(p);
+  const emps = readEmployees_().filter(e => activeBetween_(e, p.start, p.end));
+  const log = readOtLog_();
+  const shiftLog = readLog_();
+  const state = {}, shift = {};
+  dates.forEach(d => { state[d] = dayState_(log, d); shift[d] = dayState_(shiftLog, d); });
+
+  const sh = freshSheet_(CFG.OT_VIEW_PREFIX + p.key);
+  const H = VIEW_HEAD.length;
+  const nCol = H + dates.length + OT_TAIL.length;
+  const HOLIDAY = '#FFF2B2', OFF = '#E3E6E1';
+
+  // ไม่ merge หัวเรื่อง ด้วยเหตุผลเดียวกับชีทรอบ (ตรึงคอลัมน์ไม่ได้)
+  sh.getRange(1, 1).setValue('รวม OT วันที่ ' + p.label)
+    .setFontWeight('bold').setFontSize(12).setHorizontalAlignment('left');
+
+  sh.getRange(2, 1, 1, H).setValues([VIEW_HEAD]);
+  const dateCells = dates.map(d => { const q = ymdParts_(d); return new Date(q[0], q[1] - 1, q[2]); });
+  sh.getRange(2, H + 1, 1, dates.length).setValues([dateCells]).setNumberFormat('d-mmm');
+  sh.getRange(2, H + dates.length + 1, 1, OT_TAIL.length).setValues([OT_TAIL]);
+  sh.getRange(2, 1, 1, nCol).setFontWeight('bold').setHorizontalAlignment('center');
+  dates.forEach((d, i) => {
+    if (dateCells[i].getDay() === 0) sh.getRange(2, H + 1 + i).setBackground(HOLIDAY);
+  });
+
+  // ช่อง = ชั่วโมงที่อนุมัติแล้ว (ตัวเลข) หรือ "(รอ) n" ผลรวมนับเฉพาะที่อนุมัติแล้ว
+  const colors = [];
+  const body = emps.map(e => {
+    let sum = 0, holidays = 0;
+    const bg = [];
+    const cells = dates.map(d => {
+      const s = (state[d] || {})[e.code] || {};
+      const off = ((shift[d] || {})[e.code] || {}).ok;
+      bg.push(s.ok && s.ok.holiday ? HOLIDAY : (!s.ok && off && off.shift === 'หยุด' ? OFF : null));
+      if (s.ok) { sum += s.ok.hours; if (s.ok.holiday) holidays++; }
+      if (s.pending) return CFG.PENDING + otLabel_(s.pending);
+      return s.ok ? s.ok.hours : '';
+    });
+    colors.push(bg);
+    return [e.code, e.name, e.lineName, e.dept, e.nick].concat(cells, [sum, holidays || '']);
+  });
+
+  if (body.length) {
+    sh.getRange(4, 1, body.length, nCol).setValues(body);
+    const area = sh.getRange(4, H + 1, body.length, dates.length);
+    // สีวันหยุดมาจากข้อมูลในบันทึก สคริปต์ลงสีให้ใหม่ทุกครั้งที่สร้างชีท จึงไม่หายเหมือนสีที่ระบายมือ
+    area.setBackgrounds(colors).setHorizontalAlignment('center');
+    sh.getRange(4, H + dates.length + 1, body.length, OT_TAIL.length).setFontWeight('bold').setHorizontalAlignment('center');
+    sh.setConditionalFormatRules([
+      SpreadsheetApp.newConditionalFormatRule().whenTextStartsWith(CFG.PENDING)
+        .setBackground('#FFE4C4').setFontColor('#8A4B08').setRanges([area]).build()
+    ]);
+    emps.forEach((e, r) => dates.forEach((d, c) => {
+      const s = (state[d] || {})[e.code] || {};
+      if (s.pending) sh.getRange(4 + r, H + 1 + c).setNote('รออนุมัติ #' + s.pending.reqId + ' โดย ' + s.pending.by);
+    }));
+  }
+
+  // หมายเหตุสีใต้ตาราง
+  const noteRow = 4 + body.length + 1;
+  sh.getRange(noteRow, 1, 3, 2).setValues([['หมายเหตุ', ''], ['', 'วันหยุดที่มาทำงาน'], ['', 'วันหยุดไม่มาทำงาน']]);
+  sh.getRange(noteRow + 1, 1).setBackground(HOLIDAY);
+  sh.getRange(noteRow + 2, 1).setBackground(OFF);
+
+  sh.setFrozenRows(3);
+  sh.setFrozenColumns(5);
+  sh.setColumnWidth(2, 180);
+  SpreadsheetApp.flush();
+  return sh.getName();
+}
+
 /* ================= ย้ายข้อมูลจากชีทเดิม (ครั้งเดียว) ================= */
 
 /**
@@ -836,10 +1220,10 @@ function migrateFromLegacy() {
   const lastCol = sh.getLastColumn();
   const lastRow = sh.getLastRow();
 
-  // แถว 2 ตั้งแต่คอลัมน์ H: เก็บทุกช่องที่เป็นวันที่ ข้ามช่องว่างระหว่างบล็อกได้
-  const head = sh.getRange(2, 8, 1, Math.max(lastCol - 7, 1)).getValues()[0];
+  // แถว 2 ตั้งแต่คอลัมน์ F (ถัดจากชื่อเล่น): เก็บทุกช่องที่เป็นวันที่ ข้ามช่องว่างระหว่างบล็อกได้
+  const head = sh.getRange(2, 6, 1, Math.max(lastCol - 5, 1)).getValues()[0];
   const cols = [];
-  head.forEach((v, i) => { if (v instanceof Date) cols.push({ ymd: ymd_(v), col: 8 + i }); });
+  head.forEach((v, i) => { if (v instanceof Date) cols.push({ ymd: ymd_(v), col: 6 + i }); });
   if (!cols.length) throw new Error('ไม่พบวันที่ในแถว 2 ของชีท "' + CFG.LEGACY_SHEET + '"');
 
   const grid = sh.getRange(4, 1, Math.max(lastRow - 3, 1), lastCol).getDisplayValues();
@@ -866,8 +1250,6 @@ function migrateFromLegacy() {
       row[EMP_COL.nick - 1] = String(r[4]).trim();
       row[EMP_COL.dept - 1] = String(r[3]).trim();
       row[EMP_COL.lineName - 1] = String(r[2]).trim();
-      row[EMP_COL.wage - 1] = String(r[5]).trim();
-      row[EMP_COL.unit - 1] = String(r[6]).trim();
       row[EMP_COL.from - 1] = '';
       row[EMP_COL.to - 1] = '';
       row[EMP_HEADERS.length - 1] = 'ย้ายจากชีทเดิม';

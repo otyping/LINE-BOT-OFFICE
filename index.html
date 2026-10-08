@@ -61,6 +61,7 @@ h1{font-size:22px;font-weight:600;margin:0;line-height:1.3}
 .statuses{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
 .pill{border:1px solid var(--line);background:var(--paper);border-radius:999px;padding:5px 13px;font-size:14px}
 .pill[aria-pressed=true]{background:var(--ink);border-color:var(--ink);color:var(--paper)}
+.kinds{margin:0 0 12px}
 .custom{display:flex;gap:6px}
 .custom label{flex:1;min-width:0;font-size:13px;color:var(--muted)}
 .custom select{display:block;width:100%;margin-top:4px;border:1px solid var(--line);background:var(--paper);color:var(--ink);border-radius:var(--r-sm);padding:8px 10px;font-size:17px;font-variant-numeric:tabular-nums}
@@ -150,20 +151,34 @@ const CONFIG = {
 const TH_M = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
 const TH_D = ['อา.','จ.','อ.','พ.','พฤ.','ศ.','ส.'];
 const TH_DL = ['อาทิตย์','จันทร์','อังคาร','พุธ','พฤหัสบดี','ศุกร์','เสาร์'];
-const S = { d:null, page:'form', date:null, groups:[], active:0, openDept:new Set(),
+const S = { d:null, page:'form', kind:'shift', date:null, groups:[], active:0, openDept:new Set(),
             pending:[], sel:new Set(), expanded:new Set(), edits:{}, rejecting:null, busy:false };
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const pd = ymd => { const [y,m,d] = ymd.split('-').map(Number); return new Date(y, m-1, d); };
 const longDate = ymd => { const x = pd(ymd); return 'วัน' + TH_DL[x.getDay()] + 'ที่ ' + x.getDate() + ' ' + TH_M[x.getMonth()] + ' ' + (x.getFullYear()+543); };
 const todayYmd = () => { const x = new Date(); return x.getFullYear() + '-' + ('0' + (x.getMonth()+1)).slice(-2) + '-' + ('0' + x.getDate()).slice(-2); };
-const newGroup =() => ({ shift:null, codes:new Set() });
+const newGroup =() => ({ shift:null, hours:null, holiday:false, codes:new Set() });
+
+/* ฟอร์มเดียวใช้ 2 เรื่อง: S.kind = 'shift' (แจ้งวันทำงาน HR อนุมัติ) หรือ 'ot' (แจ้งโอที CEO อนุมัติ) */
+const isOt = () => S.kind === 'ot';
+/* ข้อความโอที ต้องตรงกับ otLabel_ ใน Code.gs */
+const hLabel = (h, hol) => +h ? (+h) + ' ชม.' + (hol ? ' (วันหยุด)' : '') : (hol ? 'ทำงานวันหยุด' : '0 ชม.');
+/* หัวข้อของกลุ่ม: เวลาเข้า-ออก หรือชั่วโมงโอที คืน null ถ้ายังเลือกไม่ครบ */
+const gLabel = g => !isOt() ? g.shift : (g.hours == null || (!g.hours && !g.holiday) ? null : hLabel(g.hours, g.holiday));
+const entVal = e => isOt() ? String(e.hours) : e.shift;
+function hourOptions(cur){
+  const list = Array.from({ length: 25 }, (_, i) => String(i / 2)); // 0 ถึง 12 ชม. ทีละครึ่งชั่วโมง
+  if (cur != null && !list.includes(String(cur))) list.push(String(cur));
+  return (cur == null ? '<option value="">เลือก</option>' : '')
+    + list.map(v => `<option ${v===String(cur)?'selected':''}>${v}</option>`).join('');
+}
 
 function toast(msg){ const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2600); }
 
 /* Apps Script ตอบหน้า HTML แทน JSON เป็นครั้งคราว จึงลองใหม่ให้เฉพาะคำสั่งที่อ่านอย่างเดียว
    ส่วน submit/approve/reject ห้ามลองซ้ำ เพราะอาจสำเร็จไปแล้วแล้วกลายเป็นคำขอซ้อน */
-const RETRYABLE = ['init', 'pending'];
+const RETRYABLE = ['init', 'pending', 'otPending'];
 
 /* ID token ของ LINE มีอายุราว 1 ชั่วโมง แต่ LIFF จำการล็อกอินไว้นานกว่านั้น (โดยเฉพาะเปิดในเบราว์เซอร์นอกแอป)
    ถ้า token หมดอายุ ต้องล็อกอินใหม่เพื่อขอ token ใหม่ ไม่อย่างนั้นฝั่ง Apps Script จะยืนยันตัวตนไม่ผ่าน
@@ -220,9 +235,13 @@ async function boot(){
     S.date = d.defaultDate;
     S.groups = [newGroup()];
     (d.user.depts.length ? d.user.depts : [...new Set(d.employees.map(e => e.dept))]).forEach(x => S.openDept.add(x));
-    if (q.get('page') === 'approve') {
-      if (d.user.role === 'HR') { S.page = 'approve'; S.pending = d.pending || []; const id = q.get('id'); if (id) { S.sel.add(id); S.expanded.add(id); } }
-      else toast('หน้ารายการรออนุมัติสำหรับ HR เท่านั้น');
+    const page = q.get('page'), id = q.get('id');
+    // CEO ใช้ได้เฉพาะเรื่องโอที จึงเปิดมาที่โอทีเสมอ
+    if (d.user.role === 'CEO' || page === 'ot' || page === 'otapprove') S.kind = 'ot';
+    if (page === 'approve' || page === 'otapprove') {
+      const need = page === 'approve' ? 'HR' : 'CEO';
+      if (d.user.role === need) { S.page = 'approve'; S.pending = (isOt() ? d.otPending : d.pending) || []; if (id) { S.sel.add(id); S.expanded.add(id); } }
+      else toast('หน้ารายการรออนุมัติสำหรับ ' + need + ' เท่านั้น');
     }
     render(true);
   } catch (e) { fail(e.message); }
@@ -292,16 +311,22 @@ function renderForm(){
 
   const groups = S.groups.map((g, i) => i === S.active ? activeGroup(g, i) : idleGroup(g, i)).join('');
   const n = totalPeople();
-  const hr = u.role === 'HR' ? `<button class="linkbtn" data-act="goapprove">รออนุมัติ ${d.pending ? d.pending.length : ''}</button>` : '';
+  const hr = u.role === 'CEO' ? `<button class="linkbtn" data-act="goapprove">โอทีรออนุมัติ ${d.otPending ? d.otPending.length : ''}</button>`
+    : (u.role === 'HR' && !isOt() && (d.pending || []).length ? `<button class="linkbtn" data-act="goapprove">รออนุมัติ ${d.pending ? d.pending.length : ''}</button>` : '');
+  const kinds = u.role === 'CEO' ? '' : `<div class="statuses kinds" role="group" aria-label="เรื่องที่แจ้ง">
+      <button class="pill" data-act="kind" data-v="shift" aria-pressed="${!isOt()}">วันทำงาน</button>
+      <button class="pill" data-act="kind" data-v="ot" aria-pressed="${isOt()}">โอที</button></div>`;
+  const unit = isOt() ? 'กลุ่ม' : 'กะ';
 
   $('#app').innerHTML = `
-    <div class="top"><div><h1>แจ้งวันทำงาน</h1><p class="sub">${esc(u.name)}</p></div>${hr}</div>
+    <div class="top"><div><h1>${isOt() ? 'แจ้งโอที' : 'แจ้งวันทำงาน'}</h1><p class="sub">${esc(u.name)}</p></div>${hr}</div>
+    ${kinds}
     <div class="dates" role="group" aria-label="เลือกวันที่">${days}</div>
     <p class="datefull">${S.date ? esc(longDate(S.date)) : 'ไม่มีวันที่ในรอบตาราง'}</p>
     ${groups}
-    <button class="add" data-act="addgroup">+ เพิ่มกะเวลาอื่น</button>`;
+    <button class="add" data-act="addgroup">${isOt() ? '+ เพิ่มกลุ่มชั่วโมงอื่น' : '+ เพิ่มกะเวลาอื่น'}</button>`;
   if (keepScroll) { const strip = $('.dates'); if (strip) strip.scrollLeft = keepScroll; }
-  bottom(`<div class="info"><b>${n ? n + ' คน' : 'ยังไม่ได้เลือกพนักงาน'}</b>${S.groups.filter(g=>g.codes.size).length} กะ</div>
+  bottom(`<div class="info"><b>${n ? n + ' คน' : 'ยังไม่ได้เลือกพนักงาน'}</b>${S.groups.filter(g=>g.codes.size).length} ${unit}</div>
           <button class="primary" data-act="review" ${n ? '' : 'disabled'}>ตรวจสอบ</button>`);
 }
 
@@ -322,25 +347,31 @@ function activeGroup(g, i){
     const picked = list.filter(e => g.codes.has(e.code)).length;
     const chips = open ? `<div class="chips">${list.map(e => {
       const o = owner(e.code), on = o === i, taken = o >= 0 && !on;
-      const sub = taken ? (S.groups[o].shift || 'กะอื่น') : e.code;
+      const sub = taken ? (gLabel(S.groups[o]) || (isOt() ? 'กลุ่มอื่น' : 'กะอื่น')) : e.code;
       return `<button class="chip ${taken?'taken':''}" data-act="person" data-v="${esc(e.code)}" aria-pressed="${on}">${esc(e.label)}<small>${esc(sub)}</small></button>`;
     }).join('')}</div>` : '';
     return `<div class="dept"><button class="dept-h" data-act="dept" data-v="${esc(dep)}" aria-expanded="${open}">
       <span><b>${esc(dep)}</b> ${list.length} คน</span><span>${picked ? 'เลือก ' + picked : ''} ${open ? '▴' : '▾'}</span></button>${chips}</div>`;
   }).join('');
 
-  return `<section class="group" aria-label="กะที่ ${i+1}">
-    <div class="ghead"><h2>กะที่ ${i+1}</h2>${S.groups.length > 1 ? `<button class="x" data-act="delgroup" data-v="${i}">ลบกะนี้</button>` : ''}</div>
-    <div class="label">เวลาเข้า-ออก</div>
+  const unit = isOt() ? 'กลุ่ม' : 'กะ';
+  const pick = isOt()
+    ? `<div class="label">ชั่วโมงโอที</div>
+    <div class="custom"><label>ชั่วโมง<select id="oth" aria-label="ชั่วโมงโอที">${hourOptions(g.hours)}</select></label></div>
+    <div class="statuses"><button class="pill" data-act="holiday" aria-pressed="${g.holiday}">ทำงานวันหยุด</button></div>`
+    : `<div class="label">เวลาเข้า-ออก</div>
     ${custom}
-    <div class="statuses">${st}</div>
+    <div class="statuses">${st}</div>`;
+  return `<section class="group" aria-label="${unit}ที่ ${i+1}">
+    <div class="ghead"><h2>${unit}ที่ ${i+1}</h2>${S.groups.length > 1 ? `<button class="x" data-act="delgroup" data-v="${i}">ลบ${unit}นี้</button>` : ''}</div>
+    ${pick}
     <div class="label">พนักงาน</div>${depts}</section>`;
 }
 
 function idleGroup(g, i){
   const names = S.d.employees.filter(e => g.codes.has(e.code)).map(e => e.label);
   return `<button class="group idle" data-act="focus" data-v="${i}">
-    <span><b>${esc(g.shift || 'ยังไม่เลือกเวลา')}</b><br><span class="sub">${names.length ? esc(names.join(', ')) : 'ยังไม่เลือกพนักงาน'}</span></span>
+    <span><b>${esc(gLabel(g) || (isOt() ? 'ยังไม่เลือกชั่วโมง' : 'ยังไม่เลือกเวลา'))}</b><br><span class="sub">${names.length ? esc(names.join(', ')) : 'ยังไม่เลือกพนักงาน'}</span></span>
     <span class="sub">แก้ไข</span></button>`;
 }
 
@@ -354,10 +385,10 @@ function bottom(html){
 function collect(){
   const groups = S.groups.filter(g => g.codes.size);
   for (const g of groups) {
-    if (!g.shift) return { err: 'ยังไม่ได้เลือกเวลาของกะที่มี ' + g.codes.size + ' คน' };
+    if (!gLabel(g)) return { err: (isOt() ? 'ยังไม่ได้เลือกชั่วโมงโอทีของกลุ่มที่มี ' : 'ยังไม่ได้เลือกเวลาของกะที่มี ') + g.codes.size + ' คน' };
   }
   const lab = c => (S.d.employees.find(e => e.code === c) || {}).label || c;
-  return { groups: groups.map(g => ({ shift: g.shift, codes: [...g.codes], names: [...g.codes].map(lab) })) };
+  return { groups: groups.map(g => ({ shift: gLabel(g), hours: g.hours, holiday: g.holiday, codes: [...g.codes], names: [...g.codes].map(lab) })) };
 }
 
 function openReview(){
@@ -366,11 +397,12 @@ function openReview(){
   $('#overlay').innerHTML = `<div class="scrim" data-act="closesheet"><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="rv">
     <h2 id="rv">ตรวจสอบก่อนส่ง</h2><p class="note">${esc(longDate(S.date))}</p>
     <div class="sum">${c.groups.map(g => `<div><b>${esc(g.shift)}</b> <span class="sub">${g.names.length} คน</span><p>${esc(g.names.join(', '))}</p></div>`).join('')}</div>
-    <p class="note">${S.d.user.role === 'HR' ? 'HR แจ้งเอง จะลงตารางทันที ไม่ต้องรออนุมัติ' : S.date < todayYmd()
-      ?'วันย้อนหลัง: คนที่ยังไม่มีเวรในวันนั้นจะลงตารางทันที ส่วนคนที่มีเวรอยู่แล้วจะส่งให้หัวหน้า HR อนุมัติก่อน'
-      : 'คำขอจะส่งถึงหัวหน้า HR ระหว่างรอ ตารางจะขึ้นว่า (รอ) จนกว่าจะอนุมัติ'}</p>
+    <p class="note">${isOt() ? (S.d.user.role === 'CEO' ? 'CEO แจ้งเอง จะบันทึกทันที ไม่ต้องรออนุมัติ' : S.date < todayYmd()
+      ? 'วันย้อนหลัง: คนที่ยังไม่มีโอทีในวันนั้นจะบันทึกทันที ส่วนการแก้โอทีที่อนุมัติไว้แล้วจะส่งให้ CEO อนุมัติก่อน'
+      : 'คำขอจะส่งถึง CEO ระหว่างรอ ตารางโอทีจะขึ้นว่า (รอ) จนกว่าจะอนุมัติ')
+      : 'จะลงตารางทันที ไม่ต้องขออนุมัติ ถ้าคนนั้นมีเวรในวันนี้อยู่แล้ว จะถูกแทนที่ด้วยค่าใหม่'}</p>
     <div class="row2"><button class="ghost" data-act="closesheet">แก้ไข</button>
-    <button class="primary" data-act="submit" ${S.busy ? 'disabled' : ''}>${S.busy ? 'กำลังส่ง…' : 'ส่ง'}</button></div></div></div>`;
+    <button class="primary" data-act="submit" ${S.busy ? 'disabled' : ''}>${S.busy ? 'กำลังส่ง…' : (isOt() ? 'ส่ง' : 'บันทึก')}</button></div></div></div>`;
 }
 function closeSheet(){ $('#overlay').innerHTML = ''; }
 
@@ -379,27 +411,31 @@ async function submit(){
   const c = collect(); if (c.err) return toast(c.err);
   S.busy = true; openReview();
   try {
-    const r = await api('submit', { date: S.date, groups: c.groups.map(g => ({ shift: g.shift, codes: g.codes })) });
+    const r = isOt()
+      ? await api('otSubmit', { date: S.date, groups: c.groups.map(g => ({ hours: g.hours, holiday: g.holiday, codes: g.codes })) })
+      : await api('submit', { date: S.date, groups: c.groups.map(g => ({ shift: g.shift, codes: g.codes })) });
+    const w = isOt() ? 'โอที' : 'ตาราง';
     const lines = gs => gs.map(g => `${g.shift}: ${g.names.join(', ')}`).join('\n');
-    const text = [r.saved ? `บันทึกตาราง ${r.dateLabel} (#${r.saved.id})\n` + lines(r.saved.groups) : '',
-                  r.id ? `ขออนุมัติตาราง ${r.dateLabel} (#${r.id})\n` + lines(r.groups) : ''].filter(Boolean).join('\n\n');
+    const text = [r.saved ? `บันทึก${w} ${r.dateLabel} (#${r.saved.id})\n` + lines(r.saved.groups) : '',
+                  r.id ? `ขออนุมัติ${w} ${r.dateLabel} (#${r.id})\n` + lines(r.groups) : ''].filter(Boolean).join('\n\n');
     try { const ctx = liff.getContext(); if (ctx && ['group','room','utou'].includes(ctx.type)) await liff.sendMessages([{ type:'text', text }]); } catch (e) {}
     closeSheet(); showDone(r);
   } catch (e) { toast(e.message); openReview(); }
-  finally { S.busy = false; const b = $('[data-act=submit]'); if (b) { b.disabled = false; b.textContent = 'ส่ง'; } }
+  finally { S.busy = false; const b = $('[data-act=submit]'); if (b) { b.disabled = false; b.textContent = isOt() ? 'ส่ง' : 'บันทึก'; } }
 }
 
 function showDone(r){
   const sum = gs => gs.map(g => `<div><b>${esc(g.shift)}</b><p>${esc(g.names.join(', '))}</p></div>`).join('');
+  const boss = isOt() ? 'CEO' : 'หัวหน้า HR';
   S.page = 'done';
   bottom('');
   $('#app').innerHTML = `<div class="done">
     <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="24" cy="24" r="21"/><path d="M14 24.5l7 7 13-14"/></svg>
-    <h2>${r.id ? 'ส่งขออนุมัติแล้ว' : 'บันทึกลงตารางแล้ว'}</h2><p class="sub">ตาราง ${esc(r.dateLabel)}</p>
+    <h2>${r.id ? 'ส่งขออนุมัติแล้ว' : 'บันทึกลงตารางแล้ว'}</h2><p class="sub">${isOt() ? 'โอที' : 'ตาราง'} ${esc(r.dateLabel)}</p>
     ${r.saved ? `<p class="note">ลงตารางแล้ว ไม่ต้องรออนุมัติ (#${esc(r.saved.id)})</p><div class="sum">${sum(r.saved.groups)}</div>` : ''}
-    ${r.id ? `<p class="note">รอหัวหน้า HR อนุมัติ (#${esc(r.id)})</p><div class="sum">${sum(r.groups)}</div>` : ''}
+    ${r.id ? `<p class="note">รอ${boss}อนุมัติ (#${esc(r.id)})</p><div class="sum">${sum(r.groups)}</div>` : ''}
     ${(r.warnings||[]).map(w => `<div class="warn">${esc(w)}</div>`).join('')}
-    ${r.id ? '<p class="note">หัวหน้า HR ได้รับแจ้งแล้ว เมื่ออนุมัติ บอทจะส่งข้อความบอกคุณ</p>' : ''}
+    ${r.id ? `<p class="note">${boss}ได้รับแจ้งแล้ว เมื่ออนุมัติ บอทจะส่งข้อความบอกคุณ</p>` : ''}
     <div class="row2"><button class="ghost" data-act="again">แจ้งวันอื่นต่อ</button><button class="primary" data-act="close">ปิด</button></div></div>`;
 }
 
@@ -414,10 +450,10 @@ function renderApprove(){
   const warnNo = (d.noCode && d.noCode.length) ? `<div class="warn">ยังไม่มีรหัสในตาราง จึงไม่แสดงในฟอร์ม: ${esc(d.noCode.join(', '))}</div>` : '';
   const cards = list.map(r => {
     const on = S.sel.has(r.id), ex = S.expanded.has(r.id), ed = S.edits[r.id] || {};
-    const shifts = [...new Set(r.entries.map(e => ed[e.code] || e.shift))];
+    const shifts = [...new Set(r.entries.map(e => isOt() ? hLabel(ed[e.code] || e.hours, e.holiday) : (ed[e.code] || e.shift)))];
     const detail = ex ? `<div class="detail">
-      ${r.entries.map(e => { const v = ed[e.code] || e.shift; return `<div class="ent"><div class="n">${esc(e.label)}<small>${e.old ? 'เดิม: ' + esc(e.old) : 'เดิม: ว่าง'}</small></div>
-        <select class="${v!==e.shift?'changed':''}" data-act="edit" data-id="${esc(r.id)}" data-code="${esc(e.code)}" aria-label="เวลาของ ${esc(e.label)}">${optionList(v)}</select></div>`; }).join('')}
+      ${r.entries.map(e => { const v = ed[e.code] || entVal(e); return `<div class="ent"><div class="n">${esc(e.label)}${e.holiday ? ' · วันหยุด' : ''}<small>${e.old ? 'เดิม: ' + esc(e.old) : 'เดิม: ว่าง'}</small></div>
+        <select class="${v!==entVal(e)?'changed':''}" data-act="edit" data-id="${esc(r.id)}" data-code="${esc(e.code)}" aria-label="${isOt() ? 'ชั่วโมงโอที' : 'เวลา'}ของ ${esc(e.label)}">${isOt() ? hourOptions(v) : optionList(v)}</select></div>`; }).join('')}
       ${(r.warnings||[]).map(w => `<div class="warn">${esc(w)}</div>`).join('')}
       ${S.rejecting === r.id
         ? `<textarea id="reason" placeholder="เหตุผลที่ไม่อนุมัติ (ส่งถึงผู้แจ้ง)"></textarea>
@@ -428,20 +464,20 @@ function renderApprove(){
       <label class="req-h"><input type="checkbox" data-act="sel" data-id="${esc(r.id)}" ${on?'checked':''}>
         <div class="m"><h3>${esc(r.dateLabel)}, ${r.entries.length} คน</h3>
         <p>${esc(shifts.join(', '))}</p><p>#${esc(r.id)} จาก ${esc(r.fromName)} ส่งเมื่อ ${esc(r.createdLabel)}</p></div></label>
-      <button class="more" data-act="expand" data-id="${esc(r.id)}" aria-expanded="${ex}">${ex ? 'ซ่อนรายละเอียด' : 'ดูรายชื่อและแก้เวลา'}</button>${detail}</article>`;
+      <button class="more" data-act="expand" data-id="${esc(r.id)}" aria-expanded="${ex}">${ex ? 'ซ่อนรายละเอียด' : (isOt() ? 'ดูรายชื่อและแก้ชั่วโมง' : 'ดูรายชื่อและแก้เวลา')}</button>${detail}</article>`;
   }).join('');
 
   $('#app').innerHTML = `
-    <div class="top"><div><h1>รออนุมัติ</h1><p class="sub">${list.length ? list.length + ' คำขอ' : 'ไม่มีคำขอค้าง'}</p></div>
-      <button class="linkbtn" data-act="goform">แจ้งวันทำงาน</button></div>
-    ${warnNo}
+    <div class="top"><div><h1>${isOt() ? 'โอทีรออนุมัติ' : 'รออนุมัติ'}</h1><p class="sub">${list.length ? list.length + ' คำขอ' : 'ไม่มีคำขอค้าง'}</p></div>
+      <button class="linkbtn" data-act="goform">${isOt() ? 'แจ้งโอที' : 'แจ้งวันทำงาน'}</button></div>
+    ${isOt() ? '' : warnNo}
     ${list.length ? cards : `<div class="state"><p>ไม่มีคำขอที่รออนุมัติ เมื่อหัวหน้างานส่งคำขอ บอทจะแจ้งคุณในแชท</p></div>`}`;
   const n = [...S.sel].filter(id => list.some(r => r.id === id)).length;
   bottom(list.length ? `<div class="info"><b>เลือก ${n} คำขอ</b>ตารางจะอัปเดตทันทีที่อนุมัติ</div>
     <button class="primary" data-act="approve" ${n && !S.busy ? '' : 'disabled'}>${S.busy ? 'กำลังบันทึก…' : 'อนุมัติที่เลือก'}</button>` : '');
 }
 
-async function refreshPending(){ const r = await api('pending'); S.pending = r.pending; S.d.pending = r.pending; }
+async function refreshPending(){ const r = await api(isOt() ? 'otPending' : 'pending'); S.pending = r.pending; S.d[isOt() ? 'otPending' : 'pending'] = r.pending; }
 
 async function approveSelected(){
   const ids = [...S.sel].filter(id => S.pending.some(r => r.id === id));
@@ -449,7 +485,7 @@ async function approveSelected(){
   S.busy = true; renderApprove();
   let ok = 0; const errs = [];
   for (const id of ids) {
-    try { await api('approve', { id, edits: S.edits[id] || {} }); ok++; S.sel.delete(id); S.expanded.delete(id); delete S.edits[id]; }
+    try { await api(isOt() ? 'otApprove' : 'approve', { id, edits: S.edits[id] || {} }); ok++; S.sel.delete(id); S.expanded.delete(id); delete S.edits[id]; }
     catch (e) { errs.push('#' + id + ': ' + e.message); }
   }
   try { await refreshPending(); } catch (e) {}
@@ -461,7 +497,7 @@ async function doReject(id){
   if (S.busy) return;
   const reason = ($('#reason') || {}).value || '';
   S.busy = true;
-  try { await api('reject', { id, reason }); S.sel.delete(id); S.expanded.delete(id); S.rejecting = null; await refreshPending(); toast('ไม่อนุมัติ #' + id + ' แล้ว ตารางยังเป็นค่าเดิม'); }
+  try { await api(isOt() ? 'otReject' : 'reject', { id, reason }); S.sel.delete(id); S.expanded.delete(id); S.rejecting = null; await refreshPending(); toast('ไม่อนุมัติ #' + id + ' แล้ว ตารางยังเป็นค่าเดิม'); }
   catch (e) { toast(e.message); }
   S.busy = false; renderApprove();
 }
@@ -474,6 +510,8 @@ document.addEventListener('click', e => {
   switch (act) {
     case 'date': setDate(v); break;
     case 'shift': g.shift = v; render(); break;
+    case 'holiday': g.holiday = !g.holiday; render(); break;
+    case 'kind': if (v !== S.kind) { S.kind = v; S.groups = [newGroup()]; S.active = 0; render(true); } break;
     case 'person': { const o = owner(v); if (o === S.active) g.codes.delete(v); else { if (o >= 0) S.groups[o].codes.delete(v); g.codes.add(v); } render(); break; }
     case 'dept': S.openDept.has(v) ? S.openDept.delete(v) : S.openDept.add(v); render(); break;
     case 'addgroup': S.groups.push(newGroup()); S.active = S.groups.length - 1; render(); break;
@@ -484,7 +522,7 @@ document.addEventListener('click', e => {
     case 'submit': submit(); break;
     case 'again': S.page = 'form'; S.groups = [newGroup()]; S.active = 0; render(true); break;
     case 'close': liff.closeWindow(); break;
-    case 'goapprove': S.page = 'approve'; S.pending = S.d.pending || []; render(); window.scrollTo(0,0); break;
+    case 'goapprove': S.page = 'approve'; S.pending = (isOt() ? S.d.otPending : S.d.pending) || []; render(); window.scrollTo(0,0); break;
     case 'goform': S.page = 'form'; render(true); window.scrollTo(0,0); break;
     case 'expand': { const id = el.dataset.id; S.expanded.has(id) ? S.expanded.delete(id) : S.expanded.add(id); renderApprove(); break; }
     case 'approve': approveSelected(); break;
@@ -500,9 +538,10 @@ document.addEventListener('change', e => {
   if (el.dataset.act === 'edit') {
     const r = S.pending.find(x => x.id === el.dataset.id), en = r.entries.find(x => x.code === el.dataset.code);
     S.edits[r.id] = S.edits[r.id] || {};
-    if (el.value === en.shift) delete S.edits[r.id][en.code]; else S.edits[r.id][en.code] = el.value;
+    if (el.value === entVal(en)) delete S.edits[r.id][en.code]; else S.edits[r.id][en.code] = el.value;
     renderApprove();
   }
+  if (el.id === 'oth') { S.groups[S.active].hours = el.value === '' ? null : +el.value; render(); }
   if (el.id === 'cin' || el.id === 'cout') {
     /* เปลี่ยนเวลาเข้า = เติมเวลาออกให้ใหม่ทุกครั้ง ส่วนเวลาออกแก้เองได้ถ้าไม่ตรง */
     const a = $('#cin').value;

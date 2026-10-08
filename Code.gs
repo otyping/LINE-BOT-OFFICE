@@ -1224,7 +1224,10 @@ function buildOtSheet_(p) {
       bg.push(s.ok && s.ok.holiday ? HOLIDAY : (!s.ok && off && off.shift === 'หยุด' ? OFF : null));
       if (s.ok) { sum += s.ok.hours; if (s.ok.holiday) holidays++; }
       if (s.pending) return CFG.PENDING + otLabel_(s.pending);
-      return s.ok ? s.ok.hours : '';
+      // วันหยุดเขียนเป็นข้อความด้วย ("3 ชม. (วันหยุด)" / "ทำงานวันหยุด") ไม่พึ่งสีอย่างเดียว:
+      // ระบบ hrsupport อ่านไฟล์ .xlsx ที่ดาวน์โหลดจากชีทนี้ไปคิดเงิน สีเป็นข้อมูลที่หายง่ายเกินไป
+      if (!s.ok) return '';
+      return s.ok.holiday ? otLabel_(s.ok) : s.ok.hours;
     });
     colors.push(bg);
     return viewHead_(e).concat(cells, [sum, holidays || '']);
